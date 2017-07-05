@@ -322,7 +322,7 @@ func (f Cipher) Decrypt(X string) (string, error) {
 }
 
 // ciph defines how the main block cipher is called.
-// When called otherwise, it is gauranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
+// When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
 func (f *Cipher) ciph(input []byte) ([]byte, error) {
 	if len(input)%aes.BlockSize != 0 {
 		return nil, errors.New("Length of ciph input must be multiple of 16")
