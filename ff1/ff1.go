@@ -39,8 +39,13 @@ const (
 	// maxRadix   = 65536 // 2^16
 )
 
-// For all AES-CBC calls, IV is always 0
-var ivZero [aes.BlockSize]byte
+var (
+	// For all AES-CBC calls, IV is always 0
+	ivZero = make([]byte, aes.BlockSize)
+
+	// Errors
+	ErrNumRadixFailed = errors.New("numRadix failed")
+)
 
 // Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
 type cbcMode interface {
@@ -51,8 +56,9 @@ type cbcMode interface {
 // A Cipher is an instance of the FF1 mode of format preserving encryption
 // using a particular key, radix, and tweak
 type Cipher struct {
-	tweak  []byte
-	radix  int
+	tweak []byte
+	radix int
+	// TODO: do these need to be uint32?
 	minLen uint32
 	maxLen uint32
 
@@ -96,7 +102,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (*Cipher, error
 		return nil, errors.New("failed to create AES block")
 	}
 
-	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero[:])
+	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
 	return &Cipher{
 		tweak:        tweak,
@@ -109,7 +115,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (*Cipher, error
 
 // Encrypt encrypts the string X over the current FF1 parameters
 // and returns the ciphertext of the same length and format
-func (f Cipher) Encrypt(X string) (string, error) {
+func (f *Cipher) Encrypt(X string) (string, error) {
 	var ret string
 	var err error
 
@@ -121,14 +127,17 @@ func (f Cipher) Encrypt(X string) (string, error) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	// Check if the message is in the current radix by using the numRadix function
-	_, err = numRadix(X, f.radix)
-	if err != nil {
+	radix := f.radix
+
+	// Check if the message is in the current radix by using the same logic as numRadix
+	var bX big.Int
+	_, ok := bX.SetString(X, radix)
+	if !ok {
 		return ret, errors.New("message is not within base/radix")
 	}
 
 	// Calculate split point
-	u := uint32(math.Floor(float64(n) / 2))
+	u := n / 2
 	v := n - u
 
 	// Split the message
@@ -136,17 +145,20 @@ func (f Cipher) Encrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Byte lengths
-	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(f.radix))) / 8))
+	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
+
+	// TODO: why does this cause cumulous allocations?
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
-	// Calculate P
+	// Calculate P, which is always 16 bytes
+	// TODO: can P be an array instead?
 	P := bytes.NewBuffer([]byte{})
 	_, err = P.Write([]byte{0x01, 0x02, 0x01, 0x00})
 	if err != nil {
 		return ret, err
 	}
 
-	err = binary.Write(P, binary.BigEndian, uint16(f.radix))
+	err = binary.Write(P, binary.BigEndian, uint16(radix))
 	if err != nil {
 		return ret, err
 	}
@@ -156,7 +168,7 @@ func (f Cipher) Encrypt(X string) (string, error) {
 		return ret, err
 	}
 
-	err = P.WriteByte(uint8(u % 256))
+	err = P.WriteByte(byte(u))
 	if err != nil {
 		return ret, err
 	}
@@ -171,33 +183,51 @@ func (f Cipher) Encrypt(X string) (string, error) {
 		return ret, err
 	}
 
+	var (
+		// Q's length is a multiple of 16
+		// TODO: can Q be a slice instead?
+		Q         bytes.Buffer
+		numB      big.Int
+		numBBytes []byte
+
+		br, bm, mod big.Int
+		y, c        big.Int
+	)
+
+	numPad := (-int(t) - b - 1) % 16
+	if numPad < 0 {
+		numPad += 16
+	}
+
+	br.SetInt64(int64(radix))
+
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
-		// Calculate Q
-		Q := bytes.NewBuffer(f.tweak)
+		Q.Reset()
 
-		numPad := (-int(t) - b - 1) % 16
-		if numPad < 0 {
-			numPad += 16
+		// Calculate Q
+		_, err = Q.Write(f.tweak)
+		if err != nil {
+			return ret, err
 		}
 
 		_, err = Q.Write(make([]byte, numPad))
 		if err != nil {
 			return ret, err
 		}
+
 		err = Q.WriteByte(byte(i))
 		if err != nil {
 			return ret, err
 		}
 
 		// B must only take up b bytes
-		var numB *big.Int
-		numB, err = numRadix(B, f.radix)
-		if err != nil {
-			return ret, err
+		_, ok = numB.SetString(B, radix)
+		if !ok {
+			return ret, ErrNumRadixFailed
 		}
 
-		numBBytes := numB.Bytes()
+		numBBytes = numB.Bytes()
 
 		_, err = Q.Write(append(make([]byte, b-len(numBBytes)), numBBytes...))
 		if err != nil {
@@ -245,23 +275,22 @@ func (f Cipher) Encrypt(X string) (string, error) {
 		} else {
 			m = int(v)
 		}
+		bm.SetInt64(int64(m))
 
-		y := big.NewInt(0)
 		y.SetBytes(S[:])
 
 		// Calculate c
-		mod := big.NewInt(0)
-		mod.Exp(big.NewInt(int64(f.radix)), big.NewInt(int64(m)), nil)
+		mod.Exp(&br, &bm, nil)
 
-		c, err := numRadix(A, f.radix)
-		if err != nil {
-			return ret, err
+		_, ok = c.SetString(A, radix)
+		if !ok {
+			return ret, ErrNumRadixFailed
 		}
 
-		c.Add(c, y)
-		c.Mod(c, mod)
+		c.Add(&c, &y)
+		c.Mod(&c, &mod)
 
-		C := c.Text(f.radix)
+		C := c.Text(radix)
 		if (len(C)) < m {
 			C = strings.Repeat("0", m-len(C)) + C
 		}
@@ -277,7 +306,7 @@ func (f Cipher) Encrypt(X string) (string, error) {
 
 // Decrypt decrypts the string X over the current FF1 parameters
 // and returns the plaintext of the same length and format
-func (f Cipher) Decrypt(X string) (string, error) {
+func (f *Cipher) Decrypt(X string) (string, error) {
 	var ret string
 	var err error
 
@@ -286,7 +315,7 @@ func (f Cipher) Decrypt(X string) (string, error) {
 
 	// Check if message length is within minLen and maxLen bounds
 	if (n < f.minLen) || (n > f.maxLen) {
-		return ret, errors.New("Message length is not within min and max bounds")
+		return ret, errors.New("message length is not within min and max bounds")
 	}
 
 	// Check if the message is in the current radix by using the numRadix function
@@ -447,25 +476,22 @@ func (f Cipher) Decrypt(X string) (string, error) {
 // When prf calls this, it will likely be a multi-block input, in which case ciph behaves as CBC mode with IV=0.
 // When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
 func (f *Cipher) ciph(input []byte) ([]byte, error) {
+	// These are checked here manually because the CryptBlocks function panics rather than returning an error
+	// So, catch the potential error earlier
 	if len(input)%aes.BlockSize != 0 {
-		return nil, errors.New("Length of prf input must be multiple of 16")
+		return nil, errors.New("length of ciph input must be multiple of 16")
 	}
 
-	ciphertext := make([]byte, len(input))
-	f.cbcEncryptor.CryptBlocks(ciphertext, input)
+	f.cbcEncryptor.CryptBlocks(input, input)
 
 	// Reset IV to 0
-	f.cbcEncryptor.(cbcMode).SetIV(ivZero[:])
+	f.cbcEncryptor.(cbcMode).SetIV(ivZero)
 
-	return ciphertext, nil
+	return input, nil
 }
 
 // PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
 func (f *Cipher) prf(input []byte) ([]byte, error) {
-	if len(input)%aes.BlockSize != 0 {
-		return nil, errors.New("Length of prf input must be multiple of 16")
-	}
-
 	cipher, err := f.ciph(input)
 	if err != nil {
 		return nil, err
@@ -481,7 +507,7 @@ func numRadix(str string, base int) (*big.Int, error) {
 	out, success := big.NewInt(0).SetString(str, base)
 
 	if !success || out == nil {
-		return nil, errors.New("numRadix failed")
+		return nil, ErrNumRadixFailed
 	}
 
 	return out, nil
@@ -492,11 +518,10 @@ func xorBytes(a, b []byte) ([]byte, error) {
 	if len(a) != len(b) {
 		return nil, errors.New("inputs to xorBytes must be of same length")
 	}
-	ret := make([]byte, len(a))
 
 	for i := 0; i < len(a); i++ {
-		ret[i] = a[i] ^ b[i]
+		b[i] = a[i] ^ b[i]
 	}
 
-	return ret, nil
+	return b, nil
 }
