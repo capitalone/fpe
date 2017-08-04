@@ -115,7 +115,6 @@ func TestEncrypt(t *testing.T) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
 		t.Run(fmt.Sprintf("Sample%d", sampleNumber), func(t *testing.T) {
-			t.Parallel()
 			key, err := hex.DecodeString(testVector.key)
 			if err != nil {
 				t.Fatalf("Unable to decode hex key: %v", testVector.key)
@@ -148,7 +147,6 @@ func TestDecrypt(t *testing.T) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
 		t.Run(fmt.Sprintf("Sample%d", sampleNumber), func(t *testing.T) {
-			t.Parallel()
 			key, err := hex.DecodeString(testVector.key)
 			if err != nil {
 				t.Fatalf("Unable to decode hex key: %v", testVector.key)

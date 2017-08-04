@@ -56,9 +56,8 @@ type cbcMode interface {
 // A Cipher is an instance of the FF1 mode of format preserving encryption
 // using a particular key, radix, and tweak
 type Cipher struct {
-	tweak []byte
-	radix int
-	// TODO: do these need to be uint32?
+	tweak  []byte
+	radix  int
 	minLen uint32
 	maxLen uint32
 
@@ -151,75 +150,71 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
 	// Calculate P, which is always 16 bytes
-	// TODO: can P be an array instead?
-	P := bytes.NewBuffer([]byte{})
-	_, err = P.Write([]byte{0x01, 0x02, 0x01, 0x00})
-	if err != nil {
-		return ret, err
-	}
+	P := make([]byte, 16)
+	P[0] = 0x01
+	P[1] = 0x02
+	P[2] = 0x01
 
-	err = binary.Write(P, binary.BigEndian, uint16(radix))
-	if err != nil {
-		return ret, err
-	}
+	// radix must fill 3 bytes, so pad 1 zero byte
+	P[3] = 0x00
+	binary.BigEndian.PutUint16(P[4:6], uint16(radix))
 
-	err = P.WriteByte(0x0a)
-	if err != nil {
-		return ret, err
-	}
+	P[6] = 0x0a
+	P[7] = byte(u) // overflow automatically does the modulus
 
-	err = P.WriteByte(byte(u))
-	if err != nil {
-		return ret, err
-	}
+	binary.BigEndian.PutUint32(P[8:12], n)
 
-	err = binary.Write(P, binary.BigEndian, n)
-	if err != nil {
-		return ret, err
-	}
+	binary.BigEndian.PutUint32(P[12:16], t)
 
-	err = binary.Write(P, binary.BigEndian, t)
-	if err != nil {
-		return ret, err
-	}
-
+	// These are re-used in the for loop below
 	var (
 		// Q's length is a multiple of 16
-		// TODO: can Q be a slice instead?
-		Q         bytes.Buffer
+		// Start it with a length of 16
+		Q     = make([]byte, 16)
+		QOrig = make([]byte, 0, 16)
+
+		// R is gauranteed to be 16 bytes since it holds output of PRF
+		R = make([]byte, 16)
+
+		// TODO: rename this
+		temp []byte
+
 		numB      big.Int
 		numBBytes []byte
 
 		br, bm, mod big.Int
 		y, c        big.Int
+
+		Y []byte
 	)
 
+	br.SetInt64(int64(radix))
+
+	maxJ := int(math.Ceil(float64(d) / 16))
+
+	// This is the fixed part of Q
 	numPad := (-int(t) - b - 1) % 16
 	if numPad < 0 {
 		numPad += 16
 	}
 
-	br.SetInt64(int64(radix))
+	QOrig = append(QOrig, f.tweak...)
+	QOrig = append(QOrig, ivZero[:numPad]...)
+
+	// PQ is at least 32 bytes, and the firs part is always P
+	// PQ := make([]byte, 0, 32)
+	// PQ = append(PQ, P...)
+
+	// temp must be 16 bytes incuding j
+	// This will only be needed if maxJ > 1, for the inner for loop
+	if maxJ > 1 {
+		temp = make([]byte, 16)
+	}
 
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
-		Q.Reset()
-
-		// Calculate Q
-		_, err = Q.Write(f.tweak)
-		if err != nil {
-			return ret, err
-		}
-
-		_, err = Q.Write(make([]byte, numPad))
-		if err != nil {
-			return ret, err
-		}
-
-		err = Q.WriteByte(byte(i))
-		if err != nil {
-			return ret, err
-		}
+		// Calculate the dynamic parts of Q
+		Q = append(QOrig, byte(i))
 
 		// B must only take up b bytes
 		_, ok = numB.SetString(B, radix)
@@ -229,28 +224,21 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 		numBBytes = numB.Bytes()
 
-		_, err = Q.Write(append(make([]byte, b-len(numBBytes)), numBBytes...))
+		Q = append(Q, ivZero[:b-len(numBBytes)]...)
+		Q = append(Q, numBBytes...)
+
+		// PQ =
+		R, err = f.prf(append(P, Q...))
 		if err != nil {
 			return ret, err
 		}
 
-		R, err := f.prf(append(P.Bytes(), Q.Bytes()...))
-		if err != nil {
-			return ret, err
-		}
-
-		Y := bytes.NewBuffer(R)
-		maxJ := int(math.Ceil(float64(d) / 16))
+		Y = R
 		for j := 1; j < maxJ; j++ {
-			// temp must be 16 bytes
-			temp := bytes.NewBuffer(make([]byte, 8))
-			err = binary.Write(temp, binary.BigEndian, uint64(j))
-			if err != nil {
-				return ret, err
-			}
+			binary.BigEndian.PutUint64(temp[8:], uint64(j))
 
 			var xored []byte
-			xored, err = xorBytes(R, temp.Bytes())
+			xored, err = xorBytes(R, temp)
 			if err != nil {
 				return ret, err
 			}
@@ -261,13 +249,10 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 				return ret, err
 			}
 
-			_, err = Y.Write(cipher)
-			if err != nil {
-				return ret, err
-			}
+			Y = append(Y, cipher...)
 		}
 
-		S := Y.Bytes()[:d]
+		S := Y[:d]
 
 		var m int
 		if i%2 == 0 {
@@ -491,6 +476,7 @@ func (f *Cipher) ciph(input []byte) ([]byte, error) {
 }
 
 // PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
+// PRF always outputs 16 bytes (one block)
 func (f *Cipher) prf(input []byte) ([]byte, error) {
 	cipher, err := f.ciph(input)
 	if err != nil {
