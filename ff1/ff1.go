@@ -119,7 +119,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	var err error
 
 	n := uint32(len(X))
-	t := uint32(len(f.tweak))
+	t := len(f.tweak)
 
 	// Check if message length is within minLength and maxLength bounds
 	if (n < f.minLen) || (n > f.maxLen) {
@@ -144,13 +144,35 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Byte lengths
+	// TODO: can these calculations be done more efficiently?
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
-
-	// TODO: why does this cause cumulous allocations?
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
-	// Calculate P, which is always 16 bytes
-	P := make([]byte, 16)
+	// P's length is always 16
+	const lenP = 16
+	P := make([]byte, lenP)
+
+	// This is the fixed part of Q
+	numPad := (-t - b - 1) % 16
+	if numPad < 0 {
+		numPad += 16
+	}
+
+	// Q's length is known to be t+b+1+numPad, to be multiple of 16
+	// TODO: small inputs will likely cause Q length to be 16,
+	// could start with that with larger cap and expand as necessary?
+	lenQ := t + b + 1 + numPad
+	Q := make([]byte, lenQ)
+
+	// Use PQ as a combined storage for P||Q.
+	// Only the last b+1 bytes of Q change for each loop iteration
+	// For a given input X, the size of PQ is deterministic
+	// PQ's length will always be len(P) + len(Q) = 16 + len(Q)
+	// Important: PQ is going to be encrypted in place,
+	// so P and Q will also remain separate and copied in
+	PQ := make([]byte, lenP+lenQ)
+
+	// Calculate P, which is always the first 16 bytes of PQ
 	P[0] = 0x01
 	P[1] = 0x02
 	P[2] = 0x01
@@ -163,50 +185,28 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	P[7] = byte(u) // overflow automatically does the modulus
 
 	binary.BigEndian.PutUint32(P[8:12], n)
-
-	binary.BigEndian.PutUint32(P[12:16], t)
+	binary.BigEndian.PutUint32(P[12:lenP], uint32(t))
 
 	// These are re-used in the for loop below
 	var (
-		// Q's length is a multiple of 16
-		// Start it with a length of 16
-		Q     = make([]byte, 16)
-		QOrig = make([]byte, 0, 16)
-
 		// R is gauranteed to be 16 bytes since it holds output of PRF
 		R = make([]byte, 16)
 
-		// TODO: rename this
-		temp []byte
+		// TODO: understand why c is causing many allocations
+		numB, br, bm, mod, y, c big.Int
 
-		numB      big.Int
-		numBBytes []byte
-
-		br, bm, mod big.Int
-		y, c        big.Int
-
-		Y []byte
+		// TODO: rename temp
+		temp, numBBytes, Y []byte
 	)
 
 	br.SetInt64(int64(radix))
 
-	maxJ := int(math.Ceil(float64(d) / 16))
-
-	// This is the fixed part of Q
-	numPad := (-int(t) - b - 1) % 16
-	if numPad < 0 {
-		numPad += 16
-	}
-
-	QOrig = append(QOrig, f.tweak...)
-	QOrig = append(QOrig, ivZero[:numPad]...)
-
-	// PQ is at least 32 bytes, and the firs part is always P
-	// PQ := make([]byte, 0, 32)
-	// PQ = append(PQ, P...)
+	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
+	copy(Q[:t], f.tweak)
 
 	// temp must be 16 bytes incuding j
 	// This will only be needed if maxJ > 1, for the inner for loop
+	maxJ := int(math.Ceil(float64(d) / 16))
 	if maxJ > 1 {
 		temp = make([]byte, 16)
 	}
@@ -214,21 +214,27 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
 		// Calculate the dynamic parts of Q
-		Q = append(QOrig, byte(i))
+		Q[t+numPad] = byte(i)
 
-		// B must only take up b bytes
 		_, ok = numB.SetString(B, radix)
 		if !ok {
 			return ret, ErrNumRadixFailed
 		}
-
 		numBBytes = numB.Bytes()
 
-		Q = append(Q, ivZero[:b-len(numBBytes)]...)
-		Q = append(Q, numBBytes...)
+		// These middle bytes need to be reset to 0
+		for j := 0; j < (lenQ - t - numPad - len(numBBytes)); j++ {
+			Q[t+numPad+j+1] = 0x00
+		}
 
-		// PQ =
-		R, err = f.prf(append(P, Q...))
+		// B must only take up the last b bytes
+		copy(Q[lenQ-len(numBBytes):], numBBytes)
+
+		// PQ = P||Q
+		copy(PQ[:lenP], P)
+		copy(PQ[lenP:], Q)
+
+		R, err = f.prf(PQ)
 		if err != nil {
 			return ret, err
 		}
@@ -252,8 +258,6 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 			Y = append(Y, cipher...)
 		}
 
-		S := Y[:d]
-
 		var m int
 		if i%2 == 0 {
 			m = int(u)
@@ -262,7 +266,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		}
 		bm.SetInt64(int64(m))
 
-		y.SetBytes(S[:])
+		y.SetBytes(Y[:d])
 
 		// Calculate c
 		mod.Exp(&br, &bm, nil)
