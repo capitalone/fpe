@@ -215,8 +215,6 @@ func (f Cipher) Encrypt(X string) (string, error) {
 	return ret, nil
 }
 
-var zeros = make([]byte, 16)
-
 // Decrypt decrypts the string X over the current FF3 parameters
 // and returns the plaintext of the same length and format
 func (f Cipher) Decrypt(X string) (string, error) {
@@ -284,7 +282,7 @@ func (f Cipher) Decrypt(X string) (string, error) {
 		}
 
 		numABytes := numA.Bytes()
-		P.Write(zeros[0 : 12-len(numABytes)])
+		P.Write(ivZero[0 : 12-len(numABytes)])
 		P.Write(numABytes)
 
 		// Calculate S
