@@ -246,8 +246,16 @@ func (f Cipher) Decrypt(X string) (string, error) {
 	Tl := f.tweak[:4]
 	Tr := f.tweak[4:]
 
+	// cache for c
+	var (
+		P            bytes.Buffer
+		bmod, numA   big.Int
+		br, bm, y, c big.Int
+	)
+
 	// Main Feistel Round, 8 times
 	for i := numRounds - 1; i >= 0; i-- {
+		P.Reset()
 		var m uint32
 		var W []byte
 
@@ -266,45 +274,38 @@ func (f Cipher) Decrypt(X string) (string, error) {
 		if err != nil {
 			return ret, err
 		}
-		P := bytes.NewBuffer(xored)
+		P.Write(xored)
 
-		var numA *big.Int
-		numA, err = numRadix(rev(A), f.radix)
-		if err != nil {
-			return ret, err
+		_, ok := numA.SetString(rev(A), f.radix)
+		if !ok {
+			return ret, errors.New("numRadix failed")
 		}
 
 		numABytes := numA.Bytes()
+		P.Write(ivZero[0 : 12-len(numABytes)])
+		P.Write(numABytes)
 
-		_, err = P.Write(append(make([]byte, 12-len(numABytes)), numABytes...))
-		if err != nil {
-			return ret, err
-		}
-
-		// Calculate S
 		// Calculate S
 		S, err := f.ciph(revB(P.Bytes()))
 		if err != nil {
 			return ret, err
 		}
-
 		copy(S[:], revB(S[:]))
 
 		// Calculate y
-		y := big.NewInt(0)
 		y.SetBytes(S[:])
 
 		// Calculate c
-		mod := big.NewInt(0)
-		mod.Exp(big.NewInt(int64(f.radix)), big.NewInt(int64(m)), nil)
+		br.SetInt64(int64(f.radix))
+		bm.SetInt64(int64(m))
+		bmod.Exp(&br, &bm, nil)
 
-		c, err := numRadix(rev(B), f.radix)
-		if err != nil {
-			return ret, err
+		_, ok = c.SetString(rev(B), f.radix)
+		if !ok {
+			return ret, errors.New("numRadix failed")
 		}
-
-		c.Sub(c, y)
-		c.Mod(c, mod)
+		c.Sub(&c, &y)
+		c.Mod(&c, &bmod)
 
 		// Need to pad the text with leading 0s first to make sure it's the correct length
 		C := c.Text(f.radix)
@@ -327,14 +328,11 @@ func (f *Cipher) ciph(input []byte) ([]byte, error) {
 	if len(input)%aes.BlockSize != 0 {
 		return nil, errors.New("Length of ciph input must be multiple of 16")
 	}
-
-	ciphertext := make([]byte, len(input))
-	f.cbcEncryptor.CryptBlocks(ciphertext, input)
+	f.cbcEncryptor.CryptBlocks(input, input)
 
 	// Reset IV to 0
 	f.cbcEncryptor.(cbcMode).SetIV(ivZero[:])
-
-	return ciphertext, nil
+	return input, nil
 }
 
 // numRadix interprets a string of digits as a number. Same as ParseUint but using math/big library
@@ -354,34 +352,26 @@ func xorBytes(a, b []byte) ([]byte, error) {
 	if len(a) != len(b) {
 		return nil, errors.New("inputs to xorBytes must be of same length")
 	}
-	ret := make([]byte, len(a))
-
 	for i := 0; i < len(a); i++ {
-		ret[i] = a[i] ^ b[i]
+		b[i] = a[i] ^ b[i]
 	}
-
-	return ret, nil
+	return b, nil
 }
 
 // Returns the reversed version of an arbitrary string
 func rev(s string) string {
 	r := []rune(s)
-
 	for i, j := 0, len(r)-1; i < len(r)/2; i, j = i+1, j-1 {
 		r[i], r[j] = r[j], r[i]
 	}
-
 	return string(r)
 }
 
 // Returns the reversed version of a byte array
-func revB(in []byte) []byte {
-	out := make([]byte, len(in))
-
-	for i := len(in)/2 - 1; i >= 0; i-- {
-		opp := len(in) - 1 - i
-		out[i], out[opp] = in[opp], in[i]
+func revB(a []byte) []byte {
+	for i := len(a)/2 - 1; i >= 0; i-- {
+		opp := len(a) - 1 - i
+		a[i], a[opp] = a[opp], a[i]
 	}
-
-	return out
+	return a
 }
