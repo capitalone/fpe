@@ -107,7 +107,7 @@ func NewCipher(radix int, key []byte, tweak []byte) (*Cipher, error) {
 
 // Encrypt encrypts the string X over the current FF3 parameters
 // and returns the ciphertext of the same length and format
-func (f Cipher) Encrypt(X string) (string, error) {
+func (f *Cipher) Encrypt(X string) (string, error) {
 	var ret string
 	var err error
 
@@ -217,7 +217,7 @@ func (f Cipher) Encrypt(X string) (string, error) {
 
 // Decrypt decrypts the string X over the current FF3 parameters
 // and returns the plaintext of the same length and format
-func (f Cipher) Decrypt(X string) (string, error) {
+func (f *Cipher) Decrypt(X string) (string, error) {
 	var ret string
 	var err error
 
@@ -325,6 +325,8 @@ func (f Cipher) Decrypt(X string) (string, error) {
 // ciph defines how the main block cipher is called.
 // When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
 func (f *Cipher) ciph(input []byte) ([]byte, error) {
+	// These are checked here manually because the CryptBlocks function panics rather than returning an error
+	// So, catch the potential error earlier
 	if len(input)%aes.BlockSize != 0 {
 		return nil, errors.New("Length of ciph input must be multiple of 16")
 	}

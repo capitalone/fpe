@@ -22,14 +22,12 @@ See the License for the specific language governing permissions and limitations 
 package ff1
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
 	"math"
 	"math/big"
-	"strings"
 )
 
 // Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
@@ -44,7 +42,7 @@ var (
 	ivZero = make([]byte, aes.BlockSize)
 
 	// Errors
-	ErrNumRadixFailed = errors.New("numRadix failed")
+	ErrStringNotInRadix = errors.New("string is not within base/radix")
 )
 
 // Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
@@ -128,11 +126,11 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 	radix := f.radix
 
-	// Check if the message is in the current radix by using the same logic as numRadix
+	// Check if the message is in the current radix
 	var bX big.Int
 	_, ok := bX.SetString(X, radix)
 	if !ok {
-		return ret, errors.New("message is not within base/radix")
+		return ret, ErrStringNotInRadix
 	}
 
 	// Calculate split point
@@ -197,15 +195,20 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 		// TODO: rename temp
 		temp, numBBytes, Y []byte
+
+		m int
 	)
 
 	br.SetInt64(int64(radix))
 
 	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
+	// TODO: Figure out why this is causing allocations
 	copy(Q[:t], f.tweak)
 
 	// temp must be 16 bytes incuding j
 	// This will only be needed if maxJ > 1, for the inner for loop
+	// TODO:  If maxJ > 1, temp is escaping to heap, could be reduced
+	// Further, the length of Y could be pre-calculated for pre-allocation
 	maxJ := int(math.Ceil(float64(d) / 16))
 	if maxJ > 1 {
 		temp = make([]byte, 16)
@@ -218,7 +221,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 		_, ok = numB.SetString(B, radix)
 		if !ok {
-			return ret, ErrNumRadixFailed
+			return ret, ErrStringNotInRadix
 		}
 		numBBytes = numB.Bytes()
 
@@ -231,6 +234,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		copy(Q[lenQ-len(numBBytes):], numBBytes)
 
 		// PQ = P||Q
+		// Since prf/ciph will operate in place, P and Q have to be copied into PQ for each iteration to reset the contents
 		copy(PQ[:lenP], P)
 		copy(PQ[lenP:], Q)
 
@@ -239,6 +243,9 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 			return ret, err
 		}
 
+		// This is the calculation of 6iii
+		// TODO: potentially parallelize this since each xor+cipher step is independent
+		// This for loop is only executed for longer values of X, optimize this later
 		Y = R
 		for j := 1; j < maxJ; j++ {
 			binary.BigEndian.PutUint64(temp[8:], uint64(j))
@@ -258,7 +265,8 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 			Y = append(Y, cipher...)
 		}
 
-		var m int
+		y.SetBytes(Y[:d])
+
 		if i%2 == 0 {
 			m = int(u)
 		} else {
@@ -266,22 +274,23 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		}
 		bm.SetInt64(int64(m))
 
-		y.SetBytes(Y[:d])
-
 		// Calculate c
 		mod.Exp(&br, &bm, nil)
 
 		_, ok = c.SetString(A, radix)
 		if !ok {
-			return ret, ErrNumRadixFailed
+			return ret, ErrStringNotInRadix
 		}
 
 		c.Add(&c, &y)
 		c.Mod(&c, &mod)
 
+		// Interpret c as a string of the given radix of length m
+		// Ensure any left padding to meet length m
+		// TODO: pre-allocate C as a string of length m?
 		C := c.Text(radix)
-		if (len(C)) < m {
-			C = strings.Repeat("0", m-len(C)) + C
+		for len(C) < m {
+			C = "0" + C
 		}
 
 		A = B
@@ -300,21 +309,24 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 	var err error
 
 	n := uint32(len(X))
-	t := uint32(len(f.tweak))
+	t := len(f.tweak)
 
-	// Check if message length is within minLen and maxLen bounds
+	// Check if message length is within minLength and maxLength bounds
 	if (n < f.minLen) || (n > f.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	// Check if the message is in the current radix by using the numRadix function
-	_, err = numRadix(X, f.radix)
-	if err != nil {
-		return ret, errors.New("message is not within base/radix")
+	radix := f.radix
+
+	// Check if the message is in the current radix
+	var bX big.Int
+	_, ok := bX.SetString(X, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
 	}
 
 	// Calculate split point
-	u := uint32(math.Floor(float64(n) / 2))
+	u := n / 2
 	v := n - u
 
 	// Split the message
@@ -322,91 +334,114 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Byte lengths
-	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(f.radix))) / 8))
+	// TODO: can these calculations be done more efficiently?
+	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
-	// Calculate P
-	P := bytes.NewBuffer([]byte{})
-	_, err = P.Write([]byte{0x01, 0x02, 0x01, 0x00})
-	if err != nil {
-		return ret, err
+	// P's length is always 16
+	const lenP = 16
+	P := make([]byte, lenP)
+
+	// This is the fixed part of Q
+	numPad := (-t - b - 1) % 16
+	if numPad < 0 {
+		numPad += 16
 	}
 
-	err = binary.Write(P, binary.BigEndian, uint16(f.radix))
-	if err != nil {
-		return ret, err
-	}
+	// Q's length is known to be t+b+1+numPad, to be multiple of 16
+	// TODO: small inputs will likely cause Q length to be 16,
+	// could start with that with larger cap and expand as necessary?
+	lenQ := t + b + 1 + numPad
+	Q := make([]byte, lenQ)
 
-	err = P.WriteByte(0x0a)
-	if err != nil {
-		return ret, err
-	}
+	// Use PQ as a combined storage for P||Q.
+	// Only the last b+1 bytes of Q change for each loop iteration
+	// For a given input X, the size of PQ is deterministic
+	// PQ's length will always be len(P) + len(Q) = 16 + len(Q)
+	// Important: PQ is going to be encrypted in place,
+	// so P and Q will also remain separate and copied in
+	PQ := make([]byte, lenP+lenQ)
 
-	err = P.WriteByte(uint8(u % 256))
-	if err != nil {
-		return ret, err
-	}
+	// Calculate P, which is always the first 16 bytes of PQ
+	P[0] = 0x01
+	P[1] = 0x02
+	P[2] = 0x01
 
-	err = binary.Write(P, binary.BigEndian, n)
-	if err != nil {
-		return ret, err
-	}
+	// radix must fill 3 bytes, so pad 1 zero byte
+	P[3] = 0x00
+	binary.BigEndian.PutUint16(P[4:6], uint16(radix))
 
-	err = binary.Write(P, binary.BigEndian, t)
-	if err != nil {
-		return ret, err
+	P[6] = 0x0a
+	P[7] = byte(u) // overflow automatically does the modulus
+
+	binary.BigEndian.PutUint32(P[8:12], n)
+	binary.BigEndian.PutUint32(P[12:lenP], uint32(t))
+
+	// These are re-used in the for loop below
+	var (
+		// R is gauranteed to be 16 bytes since it holds output of PRF
+		R = make([]byte, 16)
+
+		// TODO: understand why c is causing many allocations
+		numA, br, bm, mod, y, c big.Int
+
+		// TODO: rename temp
+		temp, numABytes, Y []byte
+	)
+
+	br.SetInt64(int64(radix))
+
+	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
+	// Figure out why this is causing allocations
+	copy(Q[:t], f.tweak)
+
+	// temp must be 16 bytes incuding j
+	// This will only be needed if maxJ > 1, for the inner for loop
+	// TODO:  If maxJ > 1, temp is escaping to heap, could be reduced
+	// Further, the length of Y could be pre-calculated for pre-allocation
+	maxJ := int(math.Ceil(float64(d) / 16))
+	if maxJ > 1 {
+		temp = make([]byte, 16)
 	}
 
 	// Main Feistel Round, 10 times
 	for i := numRounds - 1; i >= 0; i-- {
-		// Calculate Q
-		Q := bytes.NewBuffer(f.tweak)
+		// Calculate the dynamic parts of Q
+		Q[t+numPad] = byte(i)
 
-		numPad := (-int(t) - b - 1) % 16
-		if numPad < 0 {
-			numPad += 16
+		_, ok = numA.SetString(A, radix)
+		if !ok {
+			return ret, ErrStringNotInRadix
+		}
+		numABytes = numA.Bytes()
+
+		// These middle bytes need to be reset to 0
+		for j := 0; j < (lenQ - t - numPad - len(numABytes)); j++ {
+			Q[t+numPad+j+1] = 0x00
 		}
 
-		_, err = Q.Write(make([]byte, numPad))
-		if err != nil {
-			return ret, err
-		}
-		err = Q.WriteByte(byte(i))
-		if err != nil {
-			return ret, err
-		}
+		// B must only take up the last b bytes
+		copy(Q[lenQ-len(numABytes):], numABytes)
 
-		// A must only take up b bytes
-		var numA *big.Int
-		numA, err = numRadix(A, f.radix)
-		if err != nil {
-			return ret, err
-		}
+		// PQ = P||Q
+		// Since prf/ciph will operate in place, P and Q have to be copied into PQ for each iteration to reset the contents
+		copy(PQ[:lenP], P)
+		copy(PQ[lenP:], Q)
 
-		numABytes := numA.Bytes()
-
-		_, err = Q.Write(append(make([]byte, b-len(numABytes)), numABytes...))
+		R, err = f.prf(PQ)
 		if err != nil {
 			return ret, err
 		}
 
-		R, err := f.prf(append(P.Bytes(), Q.Bytes()...))
-		if err != nil {
-			return ret, err
-		}
-
-		Y := bytes.NewBuffer(R)
-		maxJ := int(math.Ceil(float64(d) / 16))
+		// This is the calculation of 6iii
+		// TODO: potentially parallelize this since each xor+cipher step is independent
+		// This for loop is only executed for longer values of X, optimize this later
+		Y = R
 		for j := 1; j < maxJ; j++ {
-			// temp must be 16 bytes
-			temp := bytes.NewBuffer(make([]byte, 8))
-			err = binary.Write(temp, binary.BigEndian, uint64(j))
-			if err != nil {
-				return ret, err
-			}
+			binary.BigEndian.PutUint64(temp[8:], uint64(j))
 
 			var xored []byte
-			xored, err = xorBytes(R, temp.Bytes())
+			xored, err = xorBytes(R, temp)
 			if err != nil {
 				return ret, err
 			}
@@ -417,13 +452,10 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 				return ret, err
 			}
 
-			_, err = Y.Write(cipher)
-			if err != nil {
-				return ret, err
-			}
+			Y = append(Y, cipher...)
 		}
 
-		S := Y.Bytes()[:d]
+		y.SetBytes(Y[:d])
 
 		var m int
 		if i%2 == 0 {
@@ -431,25 +463,24 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 		} else {
 			m = int(v)
 		}
-
-		y := big.NewInt(0)
-		y.SetBytes(S[:])
+		bm.SetInt64(int64(m))
 
 		// Calculate c
-		mod := big.NewInt(0)
-		mod.Exp(big.NewInt(int64(f.radix)), big.NewInt(int64(m)), nil)
+		mod.Exp(&br, &bm, nil)
 
-		c, err := numRadix(B, f.radix)
-		if err != nil {
-			return ret, err
+		_, ok = c.SetString(B, radix)
+		if !ok {
+			return ret, ErrStringNotInRadix
 		}
 
-		c.Sub(c, y)
-		c.Mod(c, mod)
+		c.Sub(&c, &y)
+		c.Mod(&c, &mod)
 
-		C := c.Text(f.radix)
-		if (len(C)) < m {
-			C = strings.Repeat("0", m-len(C)) + C
+		// Interpret c as a string of the given radix of length m
+		// Ensure any left padding to meet length m
+		C := c.Text(radix)
+		for len(C) < m {
+			C = "0" + C
 		}
 
 		B = A
@@ -488,19 +519,7 @@ func (f *Cipher) prf(input []byte) ([]byte, error) {
 	}
 
 	// Only return the last block (CBC-MAC)
-	out := cipher[len(cipher)-aes.BlockSize:]
-	return out, nil
-}
-
-// numRadix interprets a string of digits as a number. Same as ParseUint but using math/big library
-func numRadix(str string, base int) (*big.Int, error) {
-	out, success := big.NewInt(0).SetString(str, base)
-
-	if !success || out == nil {
-		return nil, ErrNumRadixFailed
-	}
-
-	return out, nil
+	return cipher[len(cipher)-aes.BlockSize:], nil
 }
 
 // Assumes a and b are of same length
