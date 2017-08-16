@@ -256,8 +256,6 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 			}
 			binary.BigEndian.PutUint64(xored[8:], uint64(j))
 
-			memclr
-
 			// XOR R and j in place
 			// R, xored are always 16 bytes
 			for x := 0; x < aes.BlockSize; x++ {
