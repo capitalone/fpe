@@ -73,7 +73,8 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (*Cipher, error
 		return nil, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
-	// While FF1 allows radices in [2, 2^16], realistically there's a practical limit based on the alphabet that can be passed in
+	// While FF1 allows radices in [2, 2^16],
+	// realistically there's a practical limit based on the alphabet that can be passed in
 	if (radix < 2) || (radix > big.MaxBase) {
 		return nil, errors.New("radix must be between 2 and 36, inclusive")
 	}
@@ -93,7 +94,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (*Cipher, error
 		return nil, errors.New("minLen invalid, adjust your radix")
 	}
 
-	// aes.NewCipher automatically returns the correct block based on the length of the key passed in.
+	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
 	aesBlock, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, errors.New("failed to create AES block")
@@ -138,6 +139,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	v := n - u
 
 	// Split the message
+	// TODO: A and B can actually be slices, just converted to strings the moment they need to
 	A := X[:u]
 	B := X[u:]
 
@@ -188,13 +190,13 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	// These are re-used in the for loop below
 	var (
 		// R is gauranteed to be 16 bytes since it holds output of PRF
-		R = make([]byte, 16)
+		R = make([]byte, aes.BlockSize)
 
 		// TODO: understand why c is causing many allocations
 		numB, br, bm, mod, y, c big.Int
 
-		// TODO: rename temp
-		temp, numBBytes, Y []byte
+		numBBytes, Y []byte
+		xored        = make([]byte, aes.BlockSize)
 
 		m int
 	)
@@ -205,14 +207,11 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	// TODO: Figure out why this is causing allocations
 	copy(Q[:t], f.tweak)
 
-	// temp must be 16 bytes incuding j
+	// xored must be 16 bytes incuding j
 	// This will only be needed if maxJ > 1, for the inner for loop
-	// TODO:  If maxJ > 1, temp is escaping to heap, could be reduced
+	// Declare it as a fixed-size slice anyway so it remains on the stack
 	// Further, the length of Y could be pre-calculated for pre-allocation
 	maxJ := int(math.Ceil(float64(d) / 16))
-	if maxJ > 1 {
-		temp = make([]byte, 16)
-	}
 
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
@@ -234,7 +233,8 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		copy(Q[lenQ-len(numBBytes):], numBBytes)
 
 		// PQ = P||Q
-		// Since prf/ciph will operate in place, P and Q have to be copied into PQ for each iteration to reset the contents
+		// Since prf/ciph will operate in place, P and Q have to be copied into PQ,
+		// for each iteration to reset the contents
 		copy(PQ[:lenP], P)
 		copy(PQ[lenP:], Q)
 
@@ -246,14 +246,22 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		// This is the calculation of 6iii
 		// TODO: potentially parallelize this since each xor+cipher step is independent
 		// This for loop is only executed for longer values of X, optimize this later
+		// Y, R, and xored can be combined and operated on in-place instead of appends
 		Y = R
 		for j := 1; j < maxJ; j++ {
-			binary.BigEndian.PutUint64(temp[8:], uint64(j))
+			// Since xorBytes operates in place, xored needs to be cleared
+			// Only need to clear the first 8 bytes since j will be put in for next 8
+			for x := 0; x < 8; x++ {
+				xored[x] = 0x00
+			}
+			binary.BigEndian.PutUint64(xored[8:], uint64(j))
 
-			var xored []byte
-			xored, err = xorBytes(R, temp)
-			if err != nil {
-				return ret, err
+			memclr
+
+			// XOR R and j in place
+			// R, xored are always 16 bytes
+			for x := 0; x < aes.BlockSize; x++ {
+				xored[x] = R[x] ^ xored[x]
 			}
 
 			var cipher []byte
@@ -287,7 +295,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 		// Interpret c as a string of the given radix of length m
 		// Ensure any left padding to meet length m
-		// TODO: pre-allocate C as a string of length m?
+		// TODO: pre-allocate C as a byte slice of length m
 		C := c.Text(radix)
 		for len(C) < m {
 			C = "0" + C
@@ -380,13 +388,13 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 	// These are re-used in the for loop below
 	var (
 		// R is gauranteed to be 16 bytes since it holds output of PRF
-		R = make([]byte, 16)
+		R = make([]byte, aes.BlockSize)
 
 		// TODO: understand why c is causing many allocations
 		numA, br, bm, mod, y, c big.Int
 
-		// TODO: rename temp
-		temp, numABytes, Y []byte
+		numABytes, Y []byte
+		xored        = make([]byte, aes.BlockSize)
 	)
 
 	br.SetInt64(int64(radix))
@@ -395,14 +403,11 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 	// Figure out why this is causing allocations
 	copy(Q[:t], f.tweak)
 
-	// temp must be 16 bytes incuding j
+	// xored must be 16 bytes incuding j
 	// This will only be needed if maxJ > 1, for the inner for loop
-	// TODO:  If maxJ > 1, temp is escaping to heap, could be reduced
+	// Declare it as a fixed-size slice anyway so it remains on the stack
 	// Further, the length of Y could be pre-calculated for pre-allocation
 	maxJ := int(math.Ceil(float64(d) / 16))
-	if maxJ > 1 {
-		temp = make([]byte, 16)
-	}
 
 	// Main Feistel Round, 10 times
 	for i := numRounds - 1; i >= 0; i-- {
@@ -438,12 +443,17 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 		// This for loop is only executed for longer values of X, optimize this later
 		Y = R
 		for j := 1; j < maxJ; j++ {
-			binary.BigEndian.PutUint64(temp[8:], uint64(j))
+			// Since xorBytes operates in place, xored needs to be cleared
+			// Only need to clear the first 8 bytes since j will be put in for next 8
+			for x := 0; x < 8; x++ {
+				xored[x] = 0x00
+			}
+			binary.BigEndian.PutUint64(xored[8:], uint64(j))
 
-			var xored []byte
-			xored, err = xorBytes(R, temp)
-			if err != nil {
-				return ret, err
+			// XOR R and j in place
+			// R, xored are always 16 bytes
+			for x := 0; x < aes.BlockSize; x++ {
+				xored[x] = R[x] ^ xored[x]
 			}
 
 			var cipher []byte
@@ -520,17 +530,4 @@ func (f *Cipher) prf(input []byte) ([]byte, error) {
 
 	// Only return the last block (CBC-MAC)
 	return cipher[len(cipher)-aes.BlockSize:], nil
-}
-
-// Assumes a and b are of same length
-func xorBytes(a, b []byte) ([]byte, error) {
-	if len(a) != len(b) {
-		return nil, errors.New("inputs to xorBytes must be of same length")
-	}
-
-	for i := 0; i < len(a); i++ {
-		b[i] = a[i] ^ b[i]
-	}
-
-	return b, nil
 }

@@ -175,6 +175,35 @@ func TestDecrypt(t *testing.T) {
 	}
 }
 
+// These are for testing long inputs, which are not in the sandard test vectors
+func TestLong(t *testing.T) {
+	key, err := hex.DecodeString("2B7E151628AED2A6ABF7158809CF4F3CEF4359D8D580AA4F7F036D6F04FC6A94")
+
+	tweak, err := hex.DecodeString("")
+
+	// 16 is an arbitrary number for maxTlen
+	ff1, err := NewCipher(36, 16, key, tweak)
+	if err != nil {
+		t.Fatalf("Unable to create cipher: %v", err)
+	}
+
+	plaintext := "xs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyal"
+
+	ciphertext, err := ff1.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	decrypted, err := ff1.Decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	if plaintext != decrypted {
+		t.Fatalf("Long Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
+	}
+}
+
 // Note: panic(err) is just used for example purposes.
 func ExampleCipher_Encrypt() {
 	// Key and tweak should be byte arrays. Put your key and tweak here.
@@ -238,6 +267,28 @@ func ExampleCipher_Decrypt() {
 	// Output: 0123456789
 }
 
+func BenchmarkNewCipher(b *testing.B) {
+	for idx, testVector := range testVectors {
+		sampleNumber := idx + 1
+		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
+			key, err := hex.DecodeString(testVector.key)
+			if err != nil {
+				b.Fatalf("Unable to decode hex key: %v", testVector.key)
+			}
+
+			tweak, err := hex.DecodeString(testVector.tweak)
+			if err != nil {
+				b.Fatalf("Unable to decode tweak: %v", testVector.tweak)
+			}
+
+			b.ResetTimer()
+
+			// 16 is an arbitrary number for maxTlen
+			NewCipher(testVector.radix, 16, key, tweak)
+		})
+	}
+}
+
 func BenchmarkEncrypt(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
@@ -297,7 +348,7 @@ func BenchmarkDecrypt(b *testing.B) {
 }
 
 // BenchmarkEncryptLong is only for benchmarking the inner for loop code bath using a very large input to make d very large, making maxJ > 1
-func _BenchmarkEncryptLong(b *testing.B) {
+func BenchmarkEncryptLong(b *testing.B) {
 	key, err := hex.DecodeString("2B7E151628AED2A6ABF7158809CF4F3CEF4359D8D580AA4F7F036D6F04FC6A94")
 
 	tweak, err := hex.DecodeString("")
