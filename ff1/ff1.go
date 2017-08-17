@@ -215,10 +215,12 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 	// These are re-used in the for loop below
 	var (
-		// TODO: understand why c is causing many allocations
-		numB, br, bm, mod, y, c big.Int
-		numBBytes               []byte
-		m                       int
+		// TODO: understand why numC is causing many allocations
+		numB, br, y, numC big.Int
+		evenbm, oddbm     big.Int
+		evenmod, oddmod   big.Int
+		numBBytes         []byte
+		m                 int
 	)
 
 	br.SetInt64(int64(radix))
@@ -234,6 +236,14 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	// This will only be needed if maxJ > 1, for the inner for loop
 	// xored uses the blocks after R in Y, if any
 	xored := Y[blockSize:]
+
+	// Pre-calculate the modulus since it's only one of 2 values,
+	// depending on whether i is even or odd
+	evenbm.SetInt64(int64(u))
+	oddbm.SetInt64(int64(v))
+
+	evenmod.Exp(&br, &evenbm, nil)
+	oddmod.Exp(&br, &oddbm, nil)
 
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
@@ -297,28 +307,25 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 		y.SetBytes(Y[:d])
 
-		if i%2 == 0 {
-			m = int(u)
-		} else {
-			m = int(v)
-		}
-		bm.SetInt64(int64(m))
-
-		// Calculate c
-		mod.Exp(&br, &bm, nil)
-
-		_, ok = c.SetString(A, radix)
+		_, ok = numC.SetString(A, radix)
 		if !ok {
 			return ret, ErrStringNotInRadix
 		}
 
-		c.Add(&c, &y)
-		c.Mod(&c, &mod)
+		numC.Add(&numC, &y)
 
-		// Interpret c as a string of the given radix of length m
+		if i%2 == 0 {
+			m = int(u)
+			numC.Mod(&numC, &evenmod)
+		} else {
+			m = int(v)
+			numC.Mod(&numC, &oddmod)
+		}
+
+		// Interpret numC as a string of the given radix of length m
 		// Ensure any left padding to meet length m
 		// TODO: pre-allocate C as a byte slice of length m
-		C := c.Text(radix)
+		C := numC.Text(radix)
 		for len(C) < m {
 			C = "0" + C
 		}
