@@ -32,8 +32,10 @@ import (
 
 // Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
 const (
-	feistelMin = 100
-	numRounds  = 10
+	feistelMin    = 100
+	numRounds     = 10
+	blockSize     = aes.BlockSize
+	halfBlockSize = blockSize / 2
 	// maxRadix   = 65536 // 2^16
 )
 
@@ -148,31 +150,53 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
-	// P's length is always 16
-	const lenP = 16
-	P := make([]byte, lenP)
+	maxJ := int(math.Ceil(float64(d) / 16))
 
-	// This is the fixed part of Q
 	numPad := (-t - b - 1) % 16
 	if numPad < 0 {
 		numPad += 16
 	}
 
-	// Q's length is known to be t+b+1+numPad, to be multiple of 16
+	// Determinte lengths of byte slices
+
+	// P's length is always 16, so it can stay on the stack, separate from buf
+	const lenP = blockSize
+	P := make([]byte, aes.BlockSize)
+
+	// Q's length is known to always be t+b+1+numPad, to be multiple of 16
+	lenQ := t + b + 1 + numPad
+
+	// For a given input X, the size of PQ is deterministic: 16+lenQ
+	lenPQ := lenP + lenQ
+
+	// lenY := blockSize * maxJ
+
+	// Ensure there's enough space for max(lenPQ, lenY)
+	// Q, PQ, and Y components will share underlying memory
+	// The total buffer length needs space for:
+	// Q (lenQ)
+	// PQ (lenPQ)
+	// Y = R(last block of PQ) + xored blocks (maxJ - 1)
+
+	totalBufLen := lenQ + lenPQ + (maxJ-1)*blockSize
+
+	// buf holds multiple components that change in each loop iteration
+	// This serves as the underlying buffer for Q, PQ, R, Y, xored
+	buf := make([]byte, totalBufLen)
+
 	// TODO: small inputs will likely cause Q length to be 16,
 	// could start with that with larger cap and expand as necessary?
-	lenQ := t + b + 1 + numPad
-	Q := make([]byte, lenQ)
-
-	// Use PQ as a combined storage for P||Q.
+	// Q will use the first lenQ bytes of buf
 	// Only the last b+1 bytes of Q change for each loop iteration
-	// For a given input X, the size of PQ is deterministic
-	// PQ's length will always be len(P) + len(Q) = 16 + len(Q)
+	Q := buf[:lenQ]
+
+	// Use PQ as a combined storage for P||Q
+	// PQ will use the next 16+lenQ bytes of buf
 	// Important: PQ is going to be encrypted in place,
 	// so P and Q will also remain separate and copied in
-	PQ := make([]byte, lenP+lenQ)
+	PQ := buf[lenQ : lenQ+lenPQ]
 
-	// Calculate P, which is always the first 16 bytes of PQ
+	// Calculate P
 	P[0] = 0x01
 	P[1] = 0x02
 	P[2] = 0x01
@@ -189,35 +213,45 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 	// These are re-used in the for loop below
 	var (
-		// R is gauranteed to be 16 bytes since it holds output of PRF
-		R = make([]byte, aes.BlockSize)
-
 		// TODO: understand why c is causing many allocations
 		numB, br, bm, mod, y, c big.Int
 
-		numBBytes, Y []byte
-		xored        = make([]byte, aes.BlockSize)
+		numBBytes, Y, R, xored []byte
 
 		m int
 	)
 
 	br.SetInt64(int64(radix))
 
+	// This is the fixed part of Q
 	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
 	// TODO: Figure out why this is causing allocations
 	copy(Q[:t], f.tweak)
 
-	// xored must be 16 bytes incuding j
+	// Y starts at the start of last block of PQ, requires lenY bytes
+	// R is part of Y, Overlaps part of PQ
+	Y = buf[lenQ+lenPQ-blockSize:]
+
+	// R starts at Y, requires blockSize bytes,
+	// which overlaps with the first block of PQ
+	R = Y[:blockSize]
+
 	// This will only be needed if maxJ > 1, for the inner for loop
-	// Declare it as a fixed-size slice anyway so it remains on the stack
-	// Further, the length of Y could be pre-calculated for pre-allocation
-	maxJ := int(math.Ceil(float64(d) / 16))
+	// TODO: Declare it as a fixed-size slice anyway so it remains on the stack
+	// TODO: Further, the length of Y could be pre-calculated for pre-allocation
+	// xored uses the blocks after R in Y, which will be overwritten in place anyway
+	xored = Y[blockSize:]
 
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
+
 		// Calculate the dynamic parts of Q
 		Q[t+numPad] = byte(i)
 
+		// TODO: In theory, this SetString doesn't have to be called each time
+		// With each iteration, the radix never changes, which means when
+		// A, B change at the end of the loop, they can just be swapped,
+		// and they're already interepreted in the right radix
 		_, ok = numB.SetString(B, radix)
 		if !ok {
 			return ret, ErrStringNotInRadix
@@ -235,9 +269,10 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		// PQ = P||Q
 		// Since prf/ciph will operate in place, P and Q have to be copied into PQ,
 		// for each iteration to reset the contents
-		copy(PQ[:lenP], P)
-		copy(PQ[lenP:], Q)
+		copy(PQ[:blockSize], P)
+		copy(PQ[blockSize:], Q)
 
+		// R is guaranteed to be of length 16
 		R, err = f.prf(PQ)
 		if err != nil {
 			return ret, err
@@ -247,28 +282,28 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 		// TODO: potentially parallelize this since each xor+cipher step is independent
 		// This for loop is only executed for longer values of X, optimize this later
 		// Y, R, and xored can be combined and operated on in-place instead of appends
-		Y = R
 		for j := 1; j < maxJ; j++ {
+			// offset is used to calculate which xored block to use in this iteration
+			offset := (j - 1) * blockSize
+
 			// Since xorBytes operates in place, xored needs to be cleared
 			// Only need to clear the first 8 bytes since j will be put in for next 8
-			for x := 0; x < 8; x++ {
-				xored[x] = 0x00
+			for x := 0; x < halfBlockSize; x++ {
+				xored[offset+x] = 0x00
 			}
-			binary.BigEndian.PutUint64(xored[8:], uint64(j))
+			binary.BigEndian.PutUint64(xored[offset+halfBlockSize:offset+blockSize], uint64(j))
 
 			// XOR R and j in place
 			// R, xored are always 16 bytes
 			for x := 0; x < aes.BlockSize; x++ {
-				xored[x] = R[x] ^ xored[x]
+				xored[offset+x] = R[x] ^ xored[offset+x]
 			}
 
-			var cipher []byte
-			cipher, err = f.ciph(xored)
+			// AES encrypt the current xored block
+			_, err = f.ciph(xored[offset : offset+blockSize])
 			if err != nil {
 				return ret, err
 			}
-
-			Y = append(Y, cipher...)
 		}
 
 		y.SetBytes(Y[:d])
