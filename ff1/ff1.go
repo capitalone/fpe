@@ -43,7 +43,7 @@ var (
 	// For all AES-CBC calls, IV is always 0
 	ivZero = make([]byte, aes.BlockSize)
 
-	// Errors
+	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
 	ErrStringNotInRadix = errors.New("string is not within base/radix")
 )
 
@@ -141,7 +141,6 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	v := n - u
 
 	// Split the message
-	// TODO: A and B can actually be slices, just converted to strings the moment they need to
 	A := X[:u]
 	B := X[u:]
 
@@ -216,11 +215,10 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	// These are re-used in the for loop below
 	var (
 		// TODO: understand why numC is causing many allocations
-		numB, br, y, numC big.Int
-		evenbm, oddbm     big.Int
-		evenmod, oddmod   big.Int
-		numBBytes         []byte
-		m                 int
+		numA, numB, br, y, numC big.Int
+		evenbm, oddbm           big.Int
+		evenmod, oddmod         big.Int
+		numBBytes               []byte
 	)
 
 	br.SetInt64(int64(radix))
@@ -245,19 +243,22 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 	evenmod.Exp(&br, &evenbm, nil)
 	oddmod.Exp(&br, &oddbm, nil)
 
+	// Bootstrap for 1st round
+	_, ok = numA.SetString(A, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
+	}
+
+	_, ok = numB.SetString(B, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
+	}
+
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
 		// Calculate the dynamic parts of Q
 		Q[t+numPad] = byte(i)
 
-		// TODO: In theory, this SetString doesn't have to be called each time
-		// With each iteration, the radix never changes, which means when
-		// A, B change at the end of the loop, they can just be swapped,
-		// and they're already interepreted in the right radix
-		_, ok = numB.SetString(B, radix)
-		if !ok {
-			return ret, ErrStringNotInRadix
-		}
 		numBBytes = numB.Bytes()
 
 		// These middle bytes need to be reset to 0
@@ -307,31 +308,27 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 		y.SetBytes(Y[:d])
 
-		_, ok = numC.SetString(A, radix)
-		if !ok {
-			return ret, ErrStringNotInRadix
-		}
-
-		numC.Add(&numC, &y)
+		numC.Add(&numA, &y)
 
 		if i%2 == 0 {
-			m = int(u)
 			numC.Mod(&numC, &evenmod)
 		} else {
-			m = int(v)
 			numC.Mod(&numC, &oddmod)
 		}
 
-		// Interpret numC as a string of the given radix of length m
-		// Ensure any left padding to meet length m
-		// TODO: pre-allocate C as a byte slice of length m
-		C := numC.Text(radix)
-		for len(C) < m {
-			C = "0" + C
-		}
+		// big.Ints use pointers behind the scenes so when numB gets updated,
+		// numA will transparently get updated to it. Hence, set the bytes explicitly
+		numA.SetBytes(numBBytes)
+		numB = numC
+	}
 
-		A = B
-		B = C
+	A = numA.Text(radix)
+	B = numB.Text(radix)
+
+	// Pad B properly
+	// TODO: improve this, but don't import "strings" just for it
+	for len(B) < int(v) {
+		B = "0" + B
 	}
 
 	ret = A + B
