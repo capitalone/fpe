@@ -117,19 +117,19 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 
 // Encrypt encrypts the string X over the current FF1 parameters
 // and returns the ciphertext of the same length and format
-func (f Cipher) Encrypt(X string) (string, error) {
+func (c Cipher) Encrypt(X string) (string, error) {
 	var ret string
 	var err error
 
 	n := uint32(len(X))
-	t := len(f.tweak)
+	t := len(c.tweak)
 
 	// Check if message length is within minLength and maxLength bounds
-	if (n < f.minLen) || (n > f.maxLen) {
+	if (n < c.minLen) || (n > c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	radix := f.radix
+	radix := c.radix
 
 	// Check if the message is in the current radix
 	var bX big.Int
@@ -194,7 +194,6 @@ func (f Cipher) Encrypt(X string) (string, error) {
 	// Q (lenQ)
 	// PQ (lenPQ)
 	// Y = R(last block of PQ) + xored blocks (maxJ - 1)
-	// TODO: Declare it as a fixed-size slice anyway so it starts on the stack, then use appends?
 	totalBufLen := lenQ + lenPQ + (maxJ-1)*blockSize
 	buf := make([]byte, totalBufLen)
 
@@ -205,8 +204,7 @@ func (f Cipher) Encrypt(X string) (string, error) {
 	Q := buf[:lenQ]
 	// This is the fixed part of Q
 	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
-	// TODO: Figure out why this is causing allocations
-	copy(Q[:t], f.tweak)
+	copy(Q[:t], c.tweak)
 
 	// Use PQ as a combined storage for P||Q
 	// PQ will use the next 16+lenQ bytes of buf
@@ -215,22 +213,22 @@ func (f Cipher) Encrypt(X string) (string, error) {
 	PQ := buf[lenQ : lenQ+lenPQ]
 
 	// These are re-used in the for loop below
+	// variables names prefixed with "num" indicate big integers
 	var (
-		// TODO: understand why numC is causing many allocations
-		numA, numB, br, y, numC big.Int
-		evenbm, oddbm           big.Int
-		evenmod, oddmod         big.Int
-		numBBytes               []byte
+		numA, numB, numC big.Int
+		numRadix, numY   big.Int
+		numU, numV       big.Int
+		numModU, numModV big.Int
+		numBBytes        []byte
 	)
 
-	br.SetInt64(int64(radix))
+	numRadix.SetInt64(int64(radix))
 
 	// Y starts at the start of last block of PQ, requires lenY bytes
 	// R is part of Y, Overlaps part of PQ
 	Y := buf[lenQ+lenPQ-blockSize:]
 
-	// R starts at Y, requires blockSize bytes,
-	// which overlaps with the first block of PQ
+	// R starts at Y, requires blockSize bytes, which uses the last block of PQ
 	R := Y[:blockSize]
 
 	// This will only be needed if maxJ > 1, for the inner for loop
@@ -239,11 +237,11 @@ func (f Cipher) Encrypt(X string) (string, error) {
 
 	// Pre-calculate the modulus since it's only one of 2 values,
 	// depending on whether i is even or odd
-	evenbm.SetInt64(int64(u))
-	oddbm.SetInt64(int64(v))
+	numU.SetInt64(int64(u))
+	numV.SetInt64(int64(v))
 
-	evenmod.Exp(&br, &evenbm, nil)
-	oddmod.Exp(&br, &oddbm, nil)
+	numModU.Exp(&numRadix, &numU, nil)
+	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
 	_, ok = numA.SetString(A, radix)
@@ -278,7 +276,7 @@ func (f Cipher) Encrypt(X string) (string, error) {
 		copy(PQ[blockSize:], Q)
 
 		// R is guaranteed to be of length 16
-		R, err = f.prf(PQ)
+		R, err = c.prf(PQ)
 		if err != nil {
 			return ret, err
 		}
@@ -302,20 +300,20 @@ func (f Cipher) Encrypt(X string) (string, error) {
 			}
 
 			// AES encrypt the current xored block
-			_, err = f.ciph(xored[offset : offset+blockSize])
+			_, err = c.ciph(xored[offset : offset+blockSize])
 			if err != nil {
 				return ret, err
 			}
 		}
 
-		y.SetBytes(Y[:d])
+		numY.SetBytes(Y[:d])
 
-		numC.Add(&numA, &y)
+		numC.Add(&numA, &numY)
 
 		if i%2 == 0 {
-			numC.Mod(&numC, &evenmod)
+			numC.Mod(&numC, &numModU)
 		} else {
-			numC.Mod(&numC, &oddmod)
+			numC.Mod(&numC, &numModV)
 		}
 
 		// big.Ints use pointers behind the scenes so when numB gets updated,
@@ -340,19 +338,19 @@ func (f Cipher) Encrypt(X string) (string, error) {
 
 // Decrypt decrypts the string X over the current FF1 parameters
 // and returns the plaintext of the same length and format
-func (f Cipher) Decrypt(X string) (string, error) {
+func (c Cipher) Decrypt(X string) (string, error) {
 	var ret string
 	var err error
 
 	n := uint32(len(X))
-	t := len(f.tweak)
+	t := len(c.tweak)
 
 	// Check if message length is within minLength and maxLength bounds
-	if (n < f.minLen) || (n > f.maxLen) {
+	if (n < c.minLen) || (n > c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	radix := f.radix
+	radix := c.radix
 
 	// Check if the message is in the current radix
 	var bX big.Int
@@ -417,7 +415,6 @@ func (f Cipher) Decrypt(X string) (string, error) {
 	// Q (lenQ)
 	// PQ (lenPQ)
 	// Y = R(last block of PQ) + xored blocks (maxJ - 1)
-	// TODO: Declare it as a fixed-size slice anyway so it starts on the stack, then use appends?
 	totalBufLen := lenQ + lenPQ + (maxJ-1)*blockSize
 	buf := make([]byte, totalBufLen)
 
@@ -428,8 +425,7 @@ func (f Cipher) Decrypt(X string) (string, error) {
 	Q := buf[:lenQ]
 	// This is the fixed part of Q
 	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
-	// TODO: Figure out why this is causing allocations
-	copy(Q[:t], f.tweak)
+	copy(Q[:t], c.tweak)
 
 	// Use PQ as a combined storage for P||Q
 	// PQ will use the next 16+lenQ bytes of buf
@@ -438,22 +434,22 @@ func (f Cipher) Decrypt(X string) (string, error) {
 	PQ := buf[lenQ : lenQ+lenPQ]
 
 	// These are re-used in the for loop below
+	// variables names prefixed with "num" indicate big integers
 	var (
-		// TODO: understand why c is causing many allocations
-		numA, numB, br, y, numC big.Int
-		evenbm, oddbm           big.Int
-		evenmod, oddmod         big.Int
-		numABytes               []byte
+		numA, numB, numC big.Int
+		numRadix, numY   big.Int
+		numU, numV       big.Int
+		numModU, numModV big.Int
+		numABytes        []byte
 	)
 
-	br.SetInt64(int64(radix))
+	numRadix.SetInt64(int64(radix))
 
 	// Y starts at the start of last block of PQ, requires lenY bytes
 	// R is part of Y, Overlaps part of PQ
 	Y := buf[lenQ+lenPQ-blockSize:]
 
-	// R starts at Y, requires blockSize bytes,
-	// which overlaps with the first block of PQ
+	// R starts at Y, requires blockSize bytes, which uses the last block of PQ
 	R := Y[:blockSize]
 
 	// This will only be needed if maxJ > 1, for the inner for loop
@@ -462,11 +458,11 @@ func (f Cipher) Decrypt(X string) (string, error) {
 
 	// Pre-calculate the modulus since it's only one of 2 values,
 	// depending on whether i is even or odd
-	evenbm.SetInt64(int64(u))
-	oddbm.SetInt64(int64(v))
+	numU.SetInt64(int64(u))
+	numV.SetInt64(int64(v))
 
-	evenmod.Exp(&br, &evenbm, nil)
-	oddmod.Exp(&br, &oddbm, nil)
+	numModU.Exp(&numRadix, &numU, nil)
+	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
 	_, ok = numA.SetString(A, radix)
@@ -501,7 +497,7 @@ func (f Cipher) Decrypt(X string) (string, error) {
 		copy(PQ[blockSize:], Q)
 
 		// R is guaranteed to be of length 16
-		R, err = f.prf(PQ)
+		R, err = c.prf(PQ)
 		if err != nil {
 			return ret, err
 		}
@@ -525,20 +521,20 @@ func (f Cipher) Decrypt(X string) (string, error) {
 			}
 
 			// AES encrypt the current xored block
-			_, err = f.ciph(xored[offset : offset+blockSize])
+			_, err = c.ciph(xored[offset : offset+blockSize])
 			if err != nil {
 				return ret, err
 			}
 		}
 
-		y.SetBytes(Y[:d])
+		numY.SetBytes(Y[:d])
 
-		numC.Sub(&numB, &y)
+		numC.Sub(&numB, &numY)
 
 		if i%2 == 0 {
-			numC.Mod(&numC, &evenmod)
+			numC.Mod(&numC, &numModU)
 		} else {
-			numC.Mod(&numC, &oddmod)
+			numC.Mod(&numC, &numModV)
 		}
 
 		// big.Ints use pointers behind the scenes so when numB gets updated,
@@ -564,25 +560,25 @@ func (f Cipher) Decrypt(X string) (string, error) {
 // ciph defines how the main block cipher is called.
 // When prf calls this, it will likely be a multi-block input, in which case ciph behaves as CBC mode with IV=0.
 // When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
-func (f Cipher) ciph(input []byte) ([]byte, error) {
+func (c Cipher) ciph(input []byte) ([]byte, error) {
 	// These are checked here manually because the CryptBlocks function panics rather than returning an error
 	// So, catch the potential error earlier
 	if len(input)%aes.BlockSize != 0 {
 		return nil, errors.New("length of ciph input must be multiple of 16")
 	}
 
-	f.cbcEncryptor.CryptBlocks(input, input)
+	c.cbcEncryptor.CryptBlocks(input, input)
 
 	// Reset IV to 0
-	f.cbcEncryptor.(cbcMode).SetIV(ivZero)
+	c.cbcEncryptor.(cbcMode).SetIV(ivZero)
 
 	return input, nil
 }
 
 // PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
 // PRF always outputs 16 bytes (one block)
-func (f Cipher) prf(input []byte) ([]byte, error) {
-	cipher, err := f.ciph(input)
+func (c Cipher) prf(input []byte) ([]byte, error) {
+	cipher, err := c.ciph(input)
 	if err != nil {
 		return nil, err
 	}
