@@ -284,7 +284,9 @@ func BenchmarkNewCipher(b *testing.B) {
 			b.ResetTimer()
 
 			// 16 is an arbitrary number for maxTlen
-			NewCipher(testVector.radix, 16, key, tweak)
+			for n := 0; n < b.N; n++ {
+				NewCipher(testVector.radix, 16, key, tweak)
+			}
 		})
 	}
 }

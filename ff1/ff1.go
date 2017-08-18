@@ -67,23 +67,25 @@ type Cipher struct {
 
 // NewCipher initializes a new FF1 Cipher for encryption or decryption use
 // based on the radix, max tweak length, key and tweak parameters.
-func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (*Cipher, error) {
+func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+	var newCipher Cipher
+
 	keyLen := len(key)
 
 	// Check if the key is 128, 192, or 256 bits = 16, 24, or 32 bytes
 	if (keyLen != 16) && (keyLen != 24) && (keyLen != 32) {
-		return nil, errors.New("key length must be 128, 192, or 256 bits")
+		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
 	// While FF1 allows radices in [2, 2^16],
 	// realistically there's a practical limit based on the alphabet that can be passed in
 	if (radix < 2) || (radix > big.MaxBase) {
-		return nil, errors.New("radix must be between 2 and 36, inclusive")
+		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
 	}
 
 	// Make sure the given the length of tweak is in range
 	if (len(tweak) < 0) || (len(tweak) > maxTLen) {
-		return nil, errors.New("tweak must be between 0 and maxTLen, inclusive")
+		return newCipher, errors.New("tweak must be between 0 and maxTLen, inclusive")
 	}
 
 	// Calculate minLength
@@ -93,29 +95,29 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (*Cipher, error
 
 	// Make sure 2 <= minLength <= maxLength < 2^32 is satisfied
 	if (minLen < 2) || (maxLen < minLen) || (maxLen > math.MaxUint32) {
-		return nil, errors.New("minLen invalid, adjust your radix")
+		return newCipher, errors.New("minLen invalid, adjust your radix")
 	}
 
 	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
 	aesBlock, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, errors.New("failed to create AES block")
+		return newCipher, errors.New("failed to create AES block")
 	}
 
 	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
-	return &Cipher{
-		tweak:        tweak,
-		radix:        radix,
-		minLen:       minLen,
-		maxLen:       maxLen,
-		cbcEncryptor: cbcEncryptor,
-	}, nil
+	newCipher.tweak = tweak
+	newCipher.radix = radix
+	newCipher.minLen = minLen
+	newCipher.maxLen = maxLen
+	newCipher.cbcEncryptor = cbcEncryptor
+
+	return newCipher, nil
 }
 
 // Encrypt encrypts the string X over the current FF1 parameters
 // and returns the ciphertext of the same length and format
-func (f *Cipher) Encrypt(X string) (string, error) {
+func (f Cipher) Encrypt(X string) (string, error) {
 	var ret string
 	var err error
 
@@ -338,7 +340,7 @@ func (f *Cipher) Encrypt(X string) (string, error) {
 
 // Decrypt decrypts the string X over the current FF1 parameters
 // and returns the plaintext of the same length and format
-func (f *Cipher) Decrypt(X string) (string, error) {
+func (f Cipher) Decrypt(X string) (string, error) {
 	var ret string
 	var err error
 
@@ -558,7 +560,7 @@ func (f *Cipher) Decrypt(X string) (string, error) {
 // ciph defines how the main block cipher is called.
 // When prf calls this, it will likely be a multi-block input, in which case ciph behaves as CBC mode with IV=0.
 // When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
-func (f *Cipher) ciph(input []byte) ([]byte, error) {
+func (f Cipher) ciph(input []byte) ([]byte, error) {
 	// These are checked here manually because the CryptBlocks function panics rather than returning an error
 	// So, catch the potential error earlier
 	if len(input)%aes.BlockSize != 0 {
@@ -575,7 +577,7 @@ func (f *Cipher) ciph(input []byte) ([]byte, error) {
 
 // PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
 // PRF always outputs 16 bytes (one block)
-func (f *Cipher) prf(input []byte) ([]byte, error) {
+func (f Cipher) prf(input []byte) ([]byte, error) {
 	cipher, err := f.ciph(input)
 	if err != nil {
 		return nil, err
