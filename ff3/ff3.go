@@ -131,10 +131,13 @@ func (c Cipher) Encrypt(X string) (string, error) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	// Check if the message is in the current radix by using the numRadix function
-	_, err = numRadix(X, c.radix)
-	if err != nil {
-		return ret, errors.New("message is not within base/radix")
+	radix := c.radix
+
+	// Check if the message is in the current radix
+	var numX big.Int
+	_, ok = numX.SetString(X, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
 	}
 
 	// Calculate split point
@@ -166,7 +169,6 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 	_ = numA
 
-	radix := c.radix
 	numRadix.SetInt64(int64(radix))
 
 	// Pre-calculate the modulus since it's only one of 2 values,
@@ -269,10 +271,13 @@ func (c Cipher) Decrypt(X string) (string, error) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	// Check if the message is in the current radix by using the numRadix function
-	_, err = numRadix(X, c.radix)
-	if err != nil {
-		return ret, errors.New("message is not within base/radix")
+	radix := c.radix
+
+	// Check if the message is in the current radix
+	var numX big.Int
+	_, ok = numX.SetString(X, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
 	}
 
 	// Calculate split point
@@ -304,7 +309,6 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 	_ = numB
 
-	radix := c.radix
 	numRadix.SetInt64(int64(radix))
 
 	// Pre-calculate the modulus since it's only one of 2 values,
@@ -397,43 +401,18 @@ func (c Cipher) ciph(input []byte) ([]byte, error) {
 	if len(input)%aes.BlockSize != 0 {
 		return nil, errors.New("Length of ciph input must be multiple of 16")
 	}
+
 	c.cbcEncryptor.CryptBlocks(input, input)
 
 	// Reset IV to 0
 	c.cbcEncryptor.(cbcMode).SetIV(ivZero[:])
+
 	return input, nil
-}
-
-// numRadix interprets a string of digits as a number. Same as ParseUint but using math/big library
-func numRadix(str string, base int) (*big.Int, error) {
-	out, success := big.NewInt(0).SetString(str, base)
-
-	if !success || out == nil {
-		return nil, errors.New("numRadix failed")
-	}
-
-	return out, nil
-}
-
-// XORs two byte arrays
-// Assumes a and b are of same length
-func xorBytes(a, b []byte) ([]byte, error) {
-	if len(a) != len(b) {
-		return nil, errors.New("inputs to xorBytes must be of same length")
-	}
-	for i := 0; i < len(a); i++ {
-		b[i] = a[i] ^ b[i]
-	}
-	return b, nil
 }
 
 // Returns the reversed version of an arbitrary string
 func rev(s string) string {
-	r := []rune(s)
-	for i, j := 0, len(r)-1; i < len(r)/2; i, j = i+1, j-1 {
-		r[i], r[j] = r[j], r[i]
-	}
-	return string(r)
+	return string(revB([]byte(s)))
 }
 
 // Returns the reversed version of a byte array
