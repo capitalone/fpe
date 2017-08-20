@@ -47,12 +47,6 @@ var (
 	ErrStringNotInRadix = errors.New("string is not within base/radix")
 )
 
-// Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
-type cbcMode interface {
-	cipher.BlockMode
-	SetIV([]byte)
-}
-
 // A Cipher is an instance of the FF3 mode of format preserving encryption
 // using a particular key, radix, and tweak
 type Cipher struct {
@@ -61,8 +55,8 @@ type Cipher struct {
 	minLen uint32
 	maxLen uint32
 
-	// Re-usable CBC encryptor with exported SetIV function
-	cbcEncryptor cipher.BlockMode
+	// Re-usable AES block
+	aesBlock cipher.Block
 }
 
 // NewCipher initializes a new FF3 Cipher for encryption or decryption use
@@ -104,13 +98,11 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 		return newCipher, errors.New("failed to create AES block")
 	}
 
-	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
-
 	newCipher.tweak = tweak
 	newCipher.radix = radix
 	newCipher.minLen = minLen
 	newCipher.maxLen = maxLen
-	newCipher.cbcEncryptor = cbcEncryptor
+	newCipher.aesBlock = aesBlock
 
 	return newCipher, nil
 }
@@ -119,7 +111,6 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 // and returns the ciphertext of the same length and format
 func (c Cipher) Encrypt(X string) (string, error) {
 	var ret string
-	var err error
 	var ok bool
 
 	n := uint32(len(X))
@@ -158,16 +149,12 @@ func (c Cipher) Encrypt(X string) (string, error) {
 		m uint32
 		W []byte
 
-		iBuf [halfTweakLen]byte
-
-		numA, numB, numC big.Int
+		numB, numC       big.Int
 		numRadix, numY   big.Int
 		numU, numV       big.Int
 		numModU, numModV big.Int
-		numBBytes        []byte
+		S, numBBytes     []byte
 	)
-
-	_ = numA
 
 	numRadix.SetInt64(int64(radix))
 
@@ -191,10 +178,12 @@ func (c Cipher) Encrypt(X string) (string, error) {
 		}
 
 		// Calculate P by XORing W, i into the first 4 bytes of P
-		iBuf[3] = byte(i)
-		for x := 0; x < 4; x++ {
-			P[x] = W[x] ^ iBuf[x]
-		}
+		// i only requires 1 byte, rest are 0 padding bytes
+		// Anything XOR 0 is itself, so only need to XOR the last byte
+		P[0] = W[0]
+		P[1] = W[1]
+		P[2] = W[2]
+		P[3] = W[3] ^ byte(i)
 
 		// The remaining 12 bytes of P are for rev(B) with padding
 		_, ok = numB.SetString(rev(B), radix)
@@ -211,14 +200,12 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 		copy(P[blockSize-len(numBBytes):], numBBytes)
 
-		// Calculate S
-		var S []byte
-		S, err = c.ciph(revB(P))
-		if err != nil {
-			return ret, err
-		}
+		// Calculate S by operating on P in place
+		revP := revB(P)
 
-		copy(S[:], revB(S[:]))
+		// P is fixed-length 16 bytes, so this call cannot panic
+		c.aesBlock.Encrypt(revP, revP)
+		S = revB(revP)
 
 		// Calculate numY
 		numY.SetBytes(S[:])
@@ -259,7 +246,6 @@ func (c Cipher) Encrypt(X string) (string, error) {
 // and returns the plaintext of the same length and format
 func (c Cipher) Decrypt(X string) (string, error) {
 	var ret string
-	var err error
 	var ok bool
 
 	n := uint32(len(X))
@@ -298,16 +284,12 @@ func (c Cipher) Decrypt(X string) (string, error) {
 		m uint32
 		W []byte
 
-		iBuf [halfTweakLen]byte
-
-		numA, numB, numC big.Int
+		numA, numC       big.Int
 		numRadix, numY   big.Int
 		numU, numV       big.Int
 		numModU, numModV big.Int
-		numABytes        []byte
+		S, numABytes     []byte
 	)
-
-	_ = numB
 
 	numRadix.SetInt64(int64(radix))
 
@@ -331,10 +313,12 @@ func (c Cipher) Decrypt(X string) (string, error) {
 		}
 
 		// Calculate P by XORing W, i into the first 4 bytes of P
-		iBuf[3] = byte(i)
-		for x := 0; x < 4; x++ {
-			P[x] = W[x] ^ iBuf[x]
-		}
+		// i only requires 1 byte, rest are 0 padding bytes
+		// Anything XOR 0 is itself, so only need to XOR the last byte
+		P[0] = W[0]
+		P[1] = W[1]
+		P[2] = W[2]
+		P[3] = W[3] ^ byte(i)
 
 		// The remaining 12 bytes of P are for rev(A) with padding
 		_, ok = numA.SetString(rev(A), radix)
@@ -351,14 +335,15 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 		copy(P[blockSize-len(numABytes):], numABytes)
 
-		// Calculate S
-		var S []byte
-		S, err = c.ciph(revB(P))
-		if err != nil {
-			return ret, err
-		}
+		// Calculate S by operating on P in place
+		revP := revB(P)
 
-		copy(S[:], revB(S[:]))
+		// P is fixed-length 16 bytes, so this call cannot panic
+		c.aesBlock.Encrypt(revP, revP)
+		S = revB(revP)
+
+		// Calculate numY
+		numY.SetBytes(S[:])
 
 		// Calculate numY
 		numY.SetBytes(S[:])
@@ -393,29 +378,12 @@ func (c Cipher) Decrypt(X string) (string, error) {
 	return A + B, nil
 }
 
-// ciph defines how the main block cipher is called.
-// When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
-func (c Cipher) ciph(input []byte) ([]byte, error) {
-	// These are checked here manually because the CryptBlocks function panics rather than returning an error
-	// So, catch the potential error earlier
-	if len(input)%aes.BlockSize != 0 {
-		return nil, errors.New("Length of ciph input must be multiple of 16")
-	}
-
-	c.cbcEncryptor.CryptBlocks(input, input)
-
-	// Reset IV to 0
-	c.cbcEncryptor.(cbcMode).SetIV(ivZero[:])
-
-	return input, nil
-}
-
-// Returns the reversed version of an arbitrary string
+// rev reverses a string
 func rev(s string) string {
 	return string(revB([]byte(s)))
 }
 
-// Returns the reversed version of a byte array
+// revB reverses a byte slice in place
 func revB(a []byte) []byte {
 	for i := len(a)/2 - 1; i >= 0; i-- {
 		opp := len(a) - 1 - i
