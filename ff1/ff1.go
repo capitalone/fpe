@@ -133,8 +133,8 @@ func (c Cipher) Encrypt(X string) (string, error) {
 	radix := c.radix
 
 	// Check if the message is in the current radix
-	var bX big.Int
-	_, ok = bX.SetString(X, radix)
+	var numX big.Int
+	_, ok = numX.SetString(X, radix)
 	if !ok {
 		return ret, ErrStringNotInRadix
 	}
@@ -355,8 +355,8 @@ func (c Cipher) Decrypt(X string) (string, error) {
 	radix := c.radix
 
 	// Check if the message is in the current radix
-	var bX big.Int
-	_, ok = bX.SetString(X, radix)
+	var numX big.Int
+	_, ok = numX.SetString(X, radix)
 	if !ok {
 		return ret, ErrStringNotInRadix
 	}
