@@ -120,6 +120,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 func (c Cipher) Encrypt(X string) (string, error) {
 	var ret string
 	var err error
+	var ok bool
 
 	n := uint32(len(X))
 	t := len(c.tweak)
@@ -133,7 +134,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 	// Check if the message is in the current radix
 	var bX big.Int
-	_, ok := bX.SetString(X, radix)
+	_, ok = bX.SetString(X, radix)
 	if !ok {
 		return ret, ErrStringNotInRadix
 	}
@@ -341,6 +342,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 func (c Cipher) Decrypt(X string) (string, error) {
 	var ret string
 	var err error
+	var ok bool
 
 	n := uint32(len(X))
 	t := len(c.tweak)
@@ -354,7 +356,7 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 	// Check if the message is in the current radix
 	var bX big.Int
-	_, ok := bX.SetString(X, radix)
+	_, ok = bX.SetString(X, radix)
 	if !ok {
 		return ret, ErrStringNotInRadix
 	}

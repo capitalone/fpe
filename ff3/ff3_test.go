@@ -167,7 +167,7 @@ func TestEncrypt(t *testing.T) {
 			}
 
 			if ciphertext != testVector.ciphertext {
-				t.Fatalf("\nSample #%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nPlaintext:\t%s\nCiphertext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.plaintext, ciphertext, testVector.ciphertext)
+				t.Fatalf("\nSample%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nPlaintext:\t%s\nCiphertext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.plaintext, ciphertext, testVector.ciphertext)
 			}
 		})
 	}
@@ -198,7 +198,7 @@ func TestDecrypt(t *testing.T) {
 			}
 
 			if plaintext != testVector.plaintext {
-				t.Fatalf("\nSample #%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nCiphertext:\t%s\nPlaintext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.ciphertext, plaintext, testVector.plaintext)
+				t.Fatalf("\nSample%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nCiphertext:\t%s\nPlaintext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.ciphertext, plaintext, testVector.plaintext)
 			}
 		})
 	}
@@ -270,7 +270,7 @@ func ExampleCipher_Decrypt() {
 func BenchmarkEncrypt(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
-		b.Run(fmt.Sprintf("Sample #%d", sampleNumber), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
 			key, err := hex.DecodeString(testVector.key)
 			if err != nil {
 				b.Fatalf("Unable to decode hex key: %v", testVector.key)
@@ -298,7 +298,7 @@ func BenchmarkEncrypt(b *testing.B) {
 func BenchmarkDecrypt(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
-		b.Run(fmt.Sprintf("Sample #%d", sampleNumber), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
 			key, err := hex.DecodeString(testVector.key)
 			if err != nil {
 				b.Fatalf("Unable to decode hex key: %v", testVector.key)
