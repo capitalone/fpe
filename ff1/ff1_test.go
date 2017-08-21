@@ -349,6 +349,43 @@ func BenchmarkDecrypt(b *testing.B) {
 	}
 }
 
+// This benchmark is for the end-to-end NewCipher, Encryption, Decryption process
+// Similar to the examples
+func BenchmarkE2ESample7(b *testing.B) {
+	testVector := testVectors[6]
+	key, err := hex.DecodeString(testVector.key)
+	if err != nil {
+		b.Fatalf("Unable to decode hex key: %v", testVector.key)
+	}
+
+	tweak, err := hex.DecodeString(testVector.tweak)
+	if err != nil {
+		b.Fatalf("Unable to decode tweak: %v", testVector.tweak)
+	}
+
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		// 16 is an arbitrary number for maxTlen
+		ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+		if err != nil {
+			b.Fatalf("Unable to create cipher: %v", err)
+		}
+
+		ciphertext, err := ff1.Encrypt(testVector.plaintext)
+		if err != nil {
+			b.Fatalf("%v", err)
+		}
+
+		plaintext, err := ff1.Decrypt(ciphertext)
+		if err != nil {
+			b.Fatalf("%v", err)
+		}
+
+		_ = plaintext
+	}
+}
+
 // BenchmarkEncryptLong is only for benchmarking the inner for loop code bath using a very large input to make d very large, making maxJ > 1
 func BenchmarkEncryptLong(b *testing.B) {
 	key, err := hex.DecodeString("2B7E151628AED2A6ABF7158809CF4F3CEF4359D8D580AA4F7F036D6F04FC6A94")
