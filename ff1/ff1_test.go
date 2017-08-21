@@ -137,7 +137,7 @@ func TestEncrypt(t *testing.T) {
 			}
 
 			if ciphertext != testVector.ciphertext {
-				t.Fatalf("\nSample #%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nPlaintext:\t%s\nCiphertext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.plaintext, ciphertext, testVector.ciphertext)
+				t.Fatalf("\nSample%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nPlaintext:\t%s\nCiphertext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.plaintext, ciphertext, testVector.ciphertext)
 			}
 		})
 	}
@@ -169,9 +169,38 @@ func TestDecrypt(t *testing.T) {
 			}
 
 			if plaintext != testVector.plaintext {
-				t.Fatalf("\nSample #%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nCiphertext:\t%s\nPlaintext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.ciphertext, plaintext, testVector.plaintext)
+				t.Fatalf("\nSample%d\nRadix:\t\t%d\nKey:\t\t%s\nTweak:\t\t%s\nCiphertext:\t%s\nPlaintext:\t%s\nExpected:\t%s", sampleNumber, testVector.radix, testVector.key, testVector.tweak, testVector.ciphertext, plaintext, testVector.plaintext)
 			}
 		})
+	}
+}
+
+// These are for testing long inputs, which are not in the sandard test vectors
+func TestLong(t *testing.T) {
+	key, err := hex.DecodeString("2B7E151628AED2A6ABF7158809CF4F3CEF4359D8D580AA4F7F036D6F04FC6A94")
+
+	tweak, err := hex.DecodeString("")
+
+	// 16 is an arbitrary number for maxTlen
+	ff1, err := NewCipher(36, 16, key, tweak)
+	if err != nil {
+		t.Fatalf("Unable to create cipher: %v", err)
+	}
+
+	plaintext := "xs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyal"
+
+	ciphertext, err := ff1.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	decrypted, err := ff1.Decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	if plaintext != decrypted {
+		t.Fatalf("Long Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
 	}
 }
 
@@ -238,10 +267,34 @@ func ExampleCipher_Decrypt() {
 	// Output: 0123456789
 }
 
+func BenchmarkNewCipher(b *testing.B) {
+	for idx, testVector := range testVectors {
+		sampleNumber := idx + 1
+		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
+			key, err := hex.DecodeString(testVector.key)
+			if err != nil {
+				b.Fatalf("Unable to decode hex key: %v", testVector.key)
+			}
+
+			tweak, err := hex.DecodeString(testVector.tweak)
+			if err != nil {
+				b.Fatalf("Unable to decode tweak: %v", testVector.tweak)
+			}
+
+			b.ResetTimer()
+
+			// 16 is an arbitrary number for maxTlen
+			for n := 0; n < b.N; n++ {
+				NewCipher(testVector.radix, 16, key, tweak)
+			}
+		})
+	}
+}
+
 func BenchmarkEncrypt(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
-		b.Run(fmt.Sprintf("Sample #%d", sampleNumber), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
 			key, err := hex.DecodeString(testVector.key)
 			if err != nil {
 				b.Fatalf("Unable to decode hex key: %v", testVector.key)
@@ -270,7 +323,7 @@ func BenchmarkEncrypt(b *testing.B) {
 func BenchmarkDecrypt(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
-		b.Run(fmt.Sprintf("Sample #%d", sampleNumber), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
 			key, err := hex.DecodeString(testVector.key)
 			if err != nil {
 				b.Fatalf("Unable to decode hex key: %v", testVector.key)
@@ -293,5 +346,61 @@ func BenchmarkDecrypt(b *testing.B) {
 				ff1.Decrypt(testVector.ciphertext)
 			}
 		})
+	}
+}
+
+// This benchmark is for the end-to-end NewCipher, Encryption, Decryption process
+// Similar to the examples
+func BenchmarkE2ESample7(b *testing.B) {
+	testVector := testVectors[6]
+	key, err := hex.DecodeString(testVector.key)
+	if err != nil {
+		b.Fatalf("Unable to decode hex key: %v", testVector.key)
+	}
+
+	tweak, err := hex.DecodeString(testVector.tweak)
+	if err != nil {
+		b.Fatalf("Unable to decode tweak: %v", testVector.tweak)
+	}
+
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		// 16 is an arbitrary number for maxTlen
+		ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+		if err != nil {
+			b.Fatalf("Unable to create cipher: %v", err)
+		}
+
+		ciphertext, err := ff1.Encrypt(testVector.plaintext)
+		if err != nil {
+			b.Fatalf("%v", err)
+		}
+
+		plaintext, err := ff1.Decrypt(ciphertext)
+		if err != nil {
+			b.Fatalf("%v", err)
+		}
+
+		_ = plaintext
+	}
+}
+
+// BenchmarkEncryptLong is only for benchmarking the inner for loop code bath using a very large input to make d very large, making maxJ > 1
+func BenchmarkEncryptLong(b *testing.B) {
+	key, err := hex.DecodeString("2B7E151628AED2A6ABF7158809CF4F3CEF4359D8D580AA4F7F036D6F04FC6A94")
+
+	tweak, err := hex.DecodeString("")
+
+	// 16 is an arbitrary number for maxTlen
+	ff1, err := NewCipher(36, 16, key, tweak)
+	if err != nil {
+		b.Fatalf("Unable to create cipher: %v", err)
+	}
+
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		ff1.Encrypt("xs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwdxs8a0azh2avyalyzuwd")
 	}
 }

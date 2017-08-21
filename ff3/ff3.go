@@ -22,29 +22,30 @@ See the License for the specific language governing permissions and limitations 
 package ff3
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"errors"
 	"math"
 	"math/big"
-	"strings"
 )
 
 // Note that this is strictly following the official NIST guidelines. In the linked PDF Appendix A (READHME.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
 const (
-	feistelMin = 100
-	numRounds  = 8
+	feistelMin   = 100
+	numRounds    = 8
+	blockSize    = aes.BlockSize
+	tweakLen     = 8
+	halfTweakLen = tweakLen / 2
+	// maxRadix   = 65536 // 2^16
 )
 
-// For all AES-CBC calls, IV is always 0
-var ivZero [aes.BlockSize]byte
+var (
+	// For all AES-CBC calls, IV is always 0
+	ivZero = make([]byte, aes.BlockSize)
 
-// Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
-type cbcMode interface {
-	cipher.BlockMode
-	SetIV([]byte)
-}
+	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
+	ErrStringNotInRadix = errors.New("string is not within base/radix")
+)
 
 // A Cipher is an instance of the FF3 mode of format preserving encryption
 // using a particular key, radix, and tweak
@@ -54,28 +55,30 @@ type Cipher struct {
 	minLen uint32
 	maxLen uint32
 
-	// Re-usable CBC encryptor with exported SetIV function
-	cbcEncryptor cipher.BlockMode
+	// Re-usable AES block
+	aesBlock cipher.Block
 }
 
 // NewCipher initializes a new FF3 Cipher for encryption or decryption use
 // based on the radix, key and tweak parameters.
-func NewCipher(radix int, key []byte, tweak []byte) (*Cipher, error) {
+func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
+	var newCipher Cipher
+
 	keyLen := len(key)
 
 	// Check if the key is 128, 192, or 256 bits = 16, 24, or 32 bytes
 	if (keyLen != 16) && (keyLen != 24) && (keyLen != 32) {
-		return nil, errors.New("key length must be 128, 192, or 256 bits")
+		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
 	// While FF3 allows radices in [2, 2^16], there is a practical limit to 36 (alphanumeric) because the Go math/big library only supports up to base 36.
 	if (radix < 2) || (radix > big.MaxBase) {
-		return nil, errors.New("radix must be between 2 and 36, inclusive")
+		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
 	}
 
 	// Make sure the given the length of tweak in bits is 64
-	if len(tweak) != 8 {
-		return nil, errors.New("tweak must be 8 bytes, or 64 bits")
+	if len(tweak) != tweakLen {
+		return newCipher, errors.New("tweak must be 8 bytes, or 64 bits")
 	}
 
 	// Calculate minLength - according to the spec, radix^minLength >= 100.
@@ -85,45 +88,47 @@ func NewCipher(radix int, key []byte, tweak []byte) (*Cipher, error) {
 
 	// Make sure 2 <= minLength <= maxLength < 2*floor(log base radix of 2^96) is satisfied
 	if (minLen < 2) || (maxLen < minLen) || (float64(maxLen) > (192 / math.Log2(float64(radix)))) {
-		return nil, errors.New("minLen or maxLen invalid, adjust your radix")
+		return newCipher, errors.New("minLen or maxLen invalid, adjust your radix")
 	}
 
-	// aes.NewCipher automatically returns the correct block based on the length of the key passed in.
+	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
+	// Always use the reversed key since Encrypt and Decrypt call ciph expecting that
 	aesBlock, err := aes.NewCipher(revB(key))
 	if err != nil {
-		panic(err)
+		return newCipher, errors.New("failed to create AES block")
 	}
 
-	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero[:])
+	newCipher.tweak = tweak
+	newCipher.radix = radix
+	newCipher.minLen = minLen
+	newCipher.maxLen = maxLen
+	newCipher.aesBlock = aesBlock
 
-	return &Cipher{
-		tweak:        tweak,
-		radix:        radix,
-		minLen:       minLen,
-		maxLen:       maxLen,
-		cbcEncryptor: cbcEncryptor,
-	}, nil
+	return newCipher, nil
 }
 
 // Encrypt encrypts the string X over the current FF3 parameters
 // and returns the ciphertext of the same length and format
-func (f Cipher) Encrypt(X string) (string, error) {
+func (c Cipher) Encrypt(X string) (string, error) {
 	var ret string
-	var err error
+	var ok bool
 
 	n := uint32(len(X))
 
 	// Check if message length is within minLength and maxLength bounds
-	// BUG: when n==f.maxLen, it breaks. For now, I'm changing
+	// TODO BUG: when n==c.maxLen, it breaks. For now, I'm changing
 	// the input check to >= instead of only >
-	if (n < f.minLen) || (n >= f.maxLen) {
+	if (n < c.minLen) || (n >= c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	// Check if the message is in the current radix by using the numRadix function
-	_, err = numRadix(X, f.radix)
-	if err != nil {
-		return ret, errors.New("message is not within base/radix")
+	radix := c.radix
+
+	// Check if the message is in the current radix
+	var numX big.Int
+	_, ok = numX.SetString(X, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
 	}
 
 	// Calculate split point
@@ -135,14 +140,34 @@ func (f Cipher) Encrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Split the tweak
-	Tl := f.tweak[:4]
-	Tr := f.tweak[4:]
+	Tl := c.tweak[:halfTweakLen]
+	Tr := c.tweak[halfTweakLen:]
+
+	// P is always 16 bytes
+	var (
+		P = make([]byte, blockSize)
+		m uint32
+		W []byte
+
+		numB, numC       big.Int
+		numRadix, numY   big.Int
+		numU, numV       big.Int
+		numModU, numModV big.Int
+		S, numBBytes     []byte
+	)
+
+	numRadix.SetInt64(int64(radix))
+
+	// Pre-calculate the modulus since it's only one of 2 values,
+	// depending on whether i is even or odd
+	numU.SetInt64(int64(u))
+	numV.SetInt64(int64(v))
+
+	numModU.Exp(&numRadix, &numU, nil)
+	numModV.Exp(&numRadix, &numV, nil)
 
 	// Main Feistel Round, 8 times
 	for i := 0; i < numRounds; i++ {
-		var m uint32
-		var W []byte
-
 		// Determine Feistel Round parameters
 		if i%2 == 0 {
 			m = u
@@ -152,56 +177,58 @@ func (f Cipher) Encrypt(X string) (string, error) {
 			W = Tl
 		}
 
-		// Calculate P
-		var xored []byte
-		xored, err = xorBytes(W, []byte{0x00, 0x00, 0x00, byte(i)})
-		if err != nil {
-			return ret, err
-		}
-		P := bytes.NewBuffer(xored)
+		// Calculate P by XORing W, i into the first 4 bytes of P
+		// i only requires 1 byte, rest are 0 padding bytes
+		// Anything XOR 0 is itself, so only need to XOR the last byte
+		P[0] = W[0]
+		P[1] = W[1]
+		P[2] = W[2]
+		P[3] = W[3] ^ byte(i)
 
-		var numB *big.Int
-		numB, err = numRadix(rev(B), f.radix)
-		if err != nil {
-			return ret, err
-		}
-
-		numBBytes := numB.Bytes()
-
-		_, err = P.Write(append(make([]byte, 12-len(numBBytes)), numBBytes...))
-		if err != nil {
-			return ret, err
+		// The remaining 12 bytes of P are for rev(B) with padding
+		_, ok = numB.SetString(rev(B), radix)
+		if !ok {
+			return ret, ErrStringNotInRadix
 		}
 
-		// Calculate S
-		var S []byte
-		S, err = f.ciph(revB(P.Bytes()))
-		if err != nil {
-			return ret, err
+		numBBytes = numB.Bytes()
+
+		// These middle bytes need to be reset to 0 for padding
+		for x := 0; x < 12-len(numBBytes); x++ {
+			P[halfTweakLen+x] = 0x00
 		}
 
-		copy(S[:], revB(S[:]))
+		copy(P[blockSize-len(numBBytes):], numBBytes)
 
-		// Calculate y
-		y := big.NewInt(0)
-		y.SetBytes(S[:])
+		// Calculate S by operating on P in place
+		revP := revB(P)
+
+		// P is fixed-length 16 bytes, so this call cannot panic
+		c.aesBlock.Encrypt(revP, revP)
+		S = revB(revP)
+
+		// Calculate numY
+		numY.SetBytes(S[:])
 
 		// Calculate c
-		mod := big.NewInt(0)
-		mod.Exp(big.NewInt(int64(f.radix)), big.NewInt(int64(m)), nil)
-
-		var c *big.Int
-		c, err = numRadix(rev(A), f.radix)
-		if err != nil {
-			return ret, err
+		_, ok = numC.SetString(rev(A), radix)
+		if !ok {
+			return ret, ErrStringNotInRadix
 		}
 
-		c.Add(c, y)
-		c.Mod(c, mod)
+		numC.Add(&numC, &numY)
 
-		C := c.Text(f.radix)
-		if (len(C)) < int(m) {
-			C = strings.Repeat("0", int(m)-len(C)) + C
+		if i%2 == 0 {
+			numC.Mod(&numC, &numModU)
+		} else {
+			numC.Mod(&numC, &numModV)
+		}
+
+		C := numC.Text(c.radix)
+
+		// Need to pad the text with leading 0s first to make sure it's the correct length
+		for len(C) < int(m) {
+			C = "0" + C
 		}
 		C = rev(C)
 
@@ -217,21 +244,26 @@ func (f Cipher) Encrypt(X string) (string, error) {
 
 // Decrypt decrypts the string X over the current FF3 parameters
 // and returns the plaintext of the same length and format
-func (f Cipher) Decrypt(X string) (string, error) {
+func (c Cipher) Decrypt(X string) (string, error) {
 	var ret string
-	var err error
+	var ok bool
 
 	n := uint32(len(X))
 
 	// Check if message length is within minLength and maxLength bounds
-	if (n < f.minLen) || (n >= f.maxLen) {
+	// TODO BUG: when n==c.maxLen, it breaks. For now, I'm changing
+	// the input check to >= instead of only >
+	if (n < c.minLen) || (n >= c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
-	// Check if the message is in the current radix by using the numRadix function
-	_, err = numRadix(X, f.radix)
-	if err != nil {
-		return ret, errors.New("message is not within base/radix")
+	radix := c.radix
+
+	// Check if the message is in the current radix
+	var numX big.Int
+	_, ok = numX.SetString(X, radix)
+	if !ok {
+		return ret, ErrStringNotInRadix
 	}
 
 	// Calculate split point
@@ -243,22 +275,34 @@ func (f Cipher) Decrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Split the tweak
-	Tl := f.tweak[:4]
-	Tr := f.tweak[4:]
+	Tl := c.tweak[:halfTweakLen]
+	Tr := c.tweak[halfTweakLen:]
 
-	// cache for c
+	// P is always 16 bytes
 	var (
-		P            bytes.Buffer
-		bmod, numA   big.Int
-		br, bm, y, c big.Int
+		P = make([]byte, blockSize)
+		m uint32
+		W []byte
+
+		numA, numC       big.Int
+		numRadix, numY   big.Int
+		numU, numV       big.Int
+		numModU, numModV big.Int
+		S, numABytes     []byte
 	)
+
+	numRadix.SetInt64(int64(radix))
+
+	// Pre-calculate the modulus since it's only one of 2 values,
+	// depending on whether i is even or odd
+	numU.SetInt64(int64(u))
+	numV.SetInt64(int64(v))
+
+	numModU.Exp(&numRadix, &numU, nil)
+	numModV.Exp(&numRadix, &numV, nil)
 
 	// Main Feistel Round, 8 times
 	for i := numRounds - 1; i >= 0; i-- {
-		P.Reset()
-		var m uint32
-		var W []byte
-
 		// Determine Feistel Round parameters
 		if i%2 == 0 {
 			m = u
@@ -268,49 +312,61 @@ func (f Cipher) Decrypt(X string) (string, error) {
 			W = Tl
 		}
 
-		// Calculate P
-		var xored []byte
-		xored, err = xorBytes(W, []byte{0x00, 0x00, 0x00, byte(i)})
-		if err != nil {
-			return ret, err
-		}
-		P.Write(xored)
+		// Calculate P by XORing W, i into the first 4 bytes of P
+		// i only requires 1 byte, rest are 0 padding bytes
+		// Anything XOR 0 is itself, so only need to XOR the last byte
+		P[0] = W[0]
+		P[1] = W[1]
+		P[2] = W[2]
+		P[3] = W[3] ^ byte(i)
 
-		_, ok := numA.SetString(rev(A), f.radix)
+		// The remaining 12 bytes of P are for rev(A) with padding
+		_, ok = numA.SetString(rev(A), radix)
 		if !ok {
-			return ret, errors.New("numRadix failed")
+			return ret, ErrStringNotInRadix
 		}
 
-		numABytes := numA.Bytes()
-		P.Write(ivZero[0 : 12-len(numABytes)])
-		P.Write(numABytes)
+		numABytes = numA.Bytes()
 
-		// Calculate S
-		S, err := f.ciph(revB(P.Bytes()))
-		if err != nil {
-			return ret, err
+		// These middle bytes need to be reset to 0 for padding
+		for x := 0; x < 12-len(numABytes); x++ {
+			P[halfTweakLen+x] = 0x00
 		}
-		copy(S[:], revB(S[:]))
 
-		// Calculate y
-		y.SetBytes(S[:])
+		copy(P[blockSize-len(numABytes):], numABytes)
+
+		// Calculate S by operating on P in place
+		revP := revB(P)
+
+		// P is fixed-length 16 bytes, so this call cannot panic
+		c.aesBlock.Encrypt(revP, revP)
+		S = revB(revP)
+
+		// Calculate numY
+		numY.SetBytes(S[:])
+
+		// Calculate numY
+		numY.SetBytes(S[:])
 
 		// Calculate c
-		br.SetInt64(int64(f.radix))
-		bm.SetInt64(int64(m))
-		bmod.Exp(&br, &bm, nil)
-
-		_, ok = c.SetString(rev(B), f.radix)
+		_, ok = numC.SetString(rev(B), radix)
 		if !ok {
-			return ret, errors.New("numRadix failed")
+			return ret, ErrStringNotInRadix
 		}
-		c.Sub(&c, &y)
-		c.Mod(&c, &bmod)
+
+		numC.Sub(&numC, &numY)
+
+		if i%2 == 0 {
+			numC.Mod(&numC, &numModU)
+		} else {
+			numC.Mod(&numC, &numModV)
+		}
+
+		C := numC.Text(c.radix)
 
 		// Need to pad the text with leading 0s first to make sure it's the correct length
-		C := c.Text(f.radix)
-		if (len(C)) < int(m) {
-			C = strings.Repeat("0", int(m)-len(C)) + C
+		for len(C) < int(m) {
+			C = "0" + C
 		}
 		C = rev(C)
 
@@ -322,52 +378,12 @@ func (f Cipher) Decrypt(X string) (string, error) {
 	return A + B, nil
 }
 
-// ciph defines how the main block cipher is called.
-// When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
-func (f *Cipher) ciph(input []byte) ([]byte, error) {
-	if len(input)%aes.BlockSize != 0 {
-		return nil, errors.New("Length of ciph input must be multiple of 16")
-	}
-	f.cbcEncryptor.CryptBlocks(input, input)
-
-	// Reset IV to 0
-	f.cbcEncryptor.(cbcMode).SetIV(ivZero[:])
-	return input, nil
-}
-
-// numRadix interprets a string of digits as a number. Same as ParseUint but using math/big library
-func numRadix(str string, base int) (*big.Int, error) {
-	out, success := big.NewInt(0).SetString(str, base)
-
-	if !success || out == nil {
-		return nil, errors.New("numRadix failed")
-	}
-
-	return out, nil
-}
-
-// XORs two byte arrays
-// Assumes a and b are of same length
-func xorBytes(a, b []byte) ([]byte, error) {
-	if len(a) != len(b) {
-		return nil, errors.New("inputs to xorBytes must be of same length")
-	}
-	for i := 0; i < len(a); i++ {
-		b[i] = a[i] ^ b[i]
-	}
-	return b, nil
-}
-
-// Returns the reversed version of an arbitrary string
+// rev reverses a string
 func rev(s string) string {
-	r := []rune(s)
-	for i, j := 0, len(r)-1; i < len(r)/2; i, j = i+1, j-1 {
-		r[i], r[j] = r[j], r[i]
-	}
-	return string(r)
+	return string(revB([]byte(s)))
 }
 
-// Returns the reversed version of a byte array
+// revB reverses a byte slice in place
 func revB(a []byte) []byte {
 	for i := len(a)/2 - 1; i >= 0; i-- {
 		opp := len(a) - 1 - i
