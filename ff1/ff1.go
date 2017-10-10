@@ -264,7 +264,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 		// These middle bytes need to be reset to 0
 		for j := 0; j < (lenQ - t - numPad - len(numBBytes)); j++ {
-			Q[t+numPad+j+1] = 0x00
+			Q[t+numPad+j] = 0x00
 		}
 
 		// B must only take up the last b bytes
