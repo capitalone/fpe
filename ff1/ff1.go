@@ -262,9 +262,12 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 		numBBytes = numB.Bytes()
 
-		// These middle bytes need to be reset to 0
-		for j := 0; j < (lenQ - t - numPad - len(numBBytes)); j++ {
-			Q[t+numPad+j+1] = 0x00
+		// Zero out the rest of Q
+		// When the second half of X is all 0s, numB is 0, so numBytes is an empty slice
+		// So, zero out the rest of Q instead of just the middle bytes, which covers the numB=0 case
+		// See https://github.com/capitalone/fpe/issues/10
+		for j := t + numPad + 1; j < lenQ; j++ {
+			Q[j] = 0x00
 		}
 
 		// B must only take up the last b bytes
@@ -484,9 +487,12 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 		numABytes = numA.Bytes()
 
-		// These middle bytes need to be reset to 0
-		for j := 0; j < (lenQ - t - numPad - len(numABytes)); j++ {
-			Q[t+numPad+j+1] = 0x00
+		// Zero out the rest of Q
+		// When the second half of X is all 0s, numB is 0, so numBytes is an empty slice
+		// So, zero out the rest of Q instead of just the middle bytes, which covers the numB=0 case
+		// See https://github.com/capitalone/fpe/issues/10
+		for j := t + numPad + 1; j < lenQ; j++ {
+			Q[j] = 0x00
 		}
 
 		// B must only take up the last b bytes
