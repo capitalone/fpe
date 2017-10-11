@@ -92,15 +92,17 @@ It's important to note that, as with any cryptographic package, managing and pro
 
 Overall, this was originally written with the following goals:
 
-  * Be idiomatic as possible from a Go language, package, and interface perspective
+  * Be as idiomatic as possible from a Go language, package, and interface perspective
   * Follow the algorithm as outlined in the NIST recommendation as closely as possible
   * Attempt to be a reference implementation since one does not exist yet
 
-As such, it was not necessarily written from a performance perspective.
+As such, it was not necessarily written from a performance perspective. While some performance optimizations have been added in v1.1, the nature of format preserving encryption is to operate on strings, which are inherently slow as compared to traditional encryption algorithms which operate on bytes.
 
-As of Go 1.8.1, the standard library's [math/big](https://golang.org/pkg/math/big/) package did not support radices/bases higher than 36. As such, this initial release only supports base 36 strings, which can contain numeric digits 0-9 or lowercase alphabetic characters a-z.
+Further, while the test vectors all pass, the lack of a reference implementation makes it difficult to test ALL input combinations for correctness.
 
-Base 62 support involves simple changes to the `math/big` package; hopefully that can be contributed soon to `math/big` soon. Creating a modified `math/big` sub-package just for 4 lines of changed code seemed like overkill, hence `math/big` being updated is a better solution long term. Ideally, it can be developed further into arbitrary alphabet and base support, which may alleviate the need to use a new Go version where `math/big` has the base 62 support.
+As of Go 1.9, the standard library's [math/big](https://golang.org/pkg/math/big/) package did not support radices/bases higher than 36. As such, the initial release only supports base 36 strings, which can contain numeric digits 0-9 or lowercase alphabetic characters a-z.
+
+Base 62 support should be available come Go 1.10. See [this commit](https://github.com/golang/go/commit/51cfe6849a2b945c9a2bb9d271bf142f3bb99eca) and [this tracking issue](https://github.com/capitalone/fpe/issues/1).
 
 The only cryptographic primitive used for FF1 and FF3 is AES. This package uses Go's standard library's `crypto/aes` package for this. Note that while it technically uses AES-CBC mode, in practice it almost always is meant to act on a single-block with an IV of 0, which is effectively ECB mode. AES is also the only block cipher function that works at the moment, and the only allowed block cipher to be used for FF1/FF3, as per the spec.
 

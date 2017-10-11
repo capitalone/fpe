@@ -41,7 +41,7 @@ const (
 
 var (
 	// For all AES-CBC calls, IV is always 0
-	ivZero = make([]byte, aes.BlockSize)
+	ivZero = make([]byte, blockSize)
 
 	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
 	ErrStringNotInRadix = errors.New("string is not within base/radix")

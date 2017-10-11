@@ -41,7 +41,7 @@ const (
 
 var (
 	// For all AES-CBC calls, IV is always 0
-	ivZero = make([]byte, aes.BlockSize)
+	ivZero = make([]byte, blockSize)
 
 	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
 	ErrStringNotInRadix = errors.New("string is not within base/radix")
@@ -162,7 +162,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 	// Calculate P, doesn't change in each loop iteration
 	// P's length is always 16, so it can stay on the stack, separate from buf
 	const lenP = blockSize
-	P := make([]byte, aes.BlockSize)
+	P := make([]byte, blockSize)
 
 	P[0] = 0x01
 	P[1] = 0x02
@@ -262,9 +262,12 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 		numBBytes = numB.Bytes()
 
-		// These middle bytes need to be reset to 0
-		for j := 0; j < (lenQ - t - numPad - len(numBBytes)); j++ {
-			Q[t+numPad+j+1] = 0x00
+		// Zero out the rest of Q
+		// When the second half of X is all 0s, numB is 0, so numBytes is an empty slice
+		// So, zero out the rest of Q instead of just the middle bytes, which covers the numB=0 case
+		// See https://github.com/capitalone/fpe/issues/10
+		for j := t + numPad + 1; j < lenQ; j++ {
+			Q[j] = 0x00
 		}
 
 		// B must only take up the last b bytes
@@ -296,7 +299,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 			// XOR R and j in place
 			// R, xored are always 16 bytes
-			for x := 0; x < aes.BlockSize; x++ {
+			for x := 0; x < blockSize; x++ {
 				xored[offset+x] = R[x] ^ xored[offset+x]
 			}
 
@@ -384,7 +387,7 @@ func (c Cipher) Decrypt(X string) (string, error) {
 	// Calculate P, doesn't change in each loop iteration
 	// P's length is always 16, so it can stay on the stack, separate from buf
 	const lenP = blockSize
-	P := make([]byte, aes.BlockSize)
+	P := make([]byte, blockSize)
 
 	P[0] = 0x01
 	P[1] = 0x02
@@ -484,9 +487,12 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 		numABytes = numA.Bytes()
 
-		// These middle bytes need to be reset to 0
-		for j := 0; j < (lenQ - t - numPad - len(numABytes)); j++ {
-			Q[t+numPad+j+1] = 0x00
+		// Zero out the rest of Q
+		// When the second half of X is all 0s, numB is 0, so numBytes is an empty slice
+		// So, zero out the rest of Q instead of just the middle bytes, which covers the numB=0 case
+		// See https://github.com/capitalone/fpe/issues/10
+		for j := t + numPad + 1; j < lenQ; j++ {
+			Q[j] = 0x00
 		}
 
 		// B must only take up the last b bytes
@@ -518,7 +524,7 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 			// XOR R and j in place
 			// R, xored are always 16 bytes
-			for x := 0; x < aes.BlockSize; x++ {
+			for x := 0; x < blockSize; x++ {
 				xored[offset+x] = R[x] ^ xored[offset+x]
 			}
 
@@ -565,7 +571,7 @@ func (c Cipher) Decrypt(X string) (string, error) {
 func (c Cipher) ciph(input []byte) ([]byte, error) {
 	// These are checked here manually because the CryptBlocks function panics rather than returning an error
 	// So, catch the potential error earlier
-	if len(input)%aes.BlockSize != 0 {
+	if len(input)%blockSize != 0 {
 		return nil, errors.New("length of ciph input must be multiple of 16")
 	}
 
@@ -586,5 +592,5 @@ func (c Cipher) prf(input []byte) ([]byte, error) {
 	}
 
 	// Only return the last block (CBC-MAC)
-	return cipher[len(cipher)-aes.BlockSize:], nil
+	return cipher[len(cipher)-blockSize:], nil
 }
