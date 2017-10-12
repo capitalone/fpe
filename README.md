@@ -110,16 +110,6 @@ In the spec, it says that the radix and minimum length (minLen) of the message s
 
 Regarding how the "tweak" is used as input: I interpreted the spec as setting the tweak in the initial `NewCipher` call, instead of in each `Encrypt` and `Decrypt` call. In one sense, it is similar to passing an IV or nonce once when creating an encryptor object. It's likely that this can be modified to do it in each `Encrypt`/`Decrypt` call, if that is more applicable to what you are building.
 
-## Using a Hardware Security Module (HSM)
-
-The FF1 code can be modified to work with an HSM as well. Modify the `ff1.go` `ciph()` function to make an AES-CBC call to an HSM using the PKCS11 interface with mechanism `CKM_AES_CBC`. Instead of passing the key through, you will pass a label to the HSM object that has the key. Make sure not to use `CKM_AES_CBC_PAD` as the mechanism, you have to use `CKM_AES_CBC`!
-
-Unfortunately, because FF3 reverses the key as part of the algorithm, it is not as straightforward to use FF3 with an HSM unless you can generate the reverse of a key in the HSM itself and use that.
-
-A popular PKCS11 package for Go is [github.com/miekg/pkcs11](https://github.com/miekg/pkcs11)
-
-Hopefully, the `ff1.Cipher` `cbcEncryptor` can be more of an overridable interface such that a customized `cipher.BlockMode` can be crafted that internally calls the HSM.
-
 ## Existing Implementations
 
 Based on searching GitHub and the Internet, there are no known reference implementations for either algorithm.
