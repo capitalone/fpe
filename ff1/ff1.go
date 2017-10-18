@@ -56,10 +56,11 @@ type cbcMode interface {
 // A Cipher is an instance of the FF1 mode of format preserving encryption
 // using a particular key, radix, and tweak
 type Cipher struct {
-	tweak  []byte
-	radix  int
-	minLen uint32
-	maxLen uint32
+	tweak   []byte
+	radix   int
+	minLen  uint32
+	maxLen  uint32
+	maxTLen int
 
 	// Re-usable CBC encryptor with exported SetIV function
 	cbcEncryptor cipher.BlockMode
@@ -83,9 +84,9 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
 	}
 
-	// Make sure the given the length of tweak is in range
-	if (len(tweak) < 0) || (len(tweak) > maxTLen) {
-		return newCipher, errors.New("tweak must be between 0 and maxTLen, inclusive")
+	// Make sure the length of given tweak is in range
+	if len(tweak) > maxTLen {
+		return newCipher, errors.New("tweak must be between 0 and given maxTLen, inclusive")
 	}
 
 	// Calculate minLength
@@ -110,6 +111,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 	newCipher.radix = radix
 	newCipher.minLen = minLen
 	newCipher.maxLen = maxLen
+	newCipher.maxTLen = maxTLen
 	newCipher.cbcEncryptor = cbcEncryptor
 
 	return newCipher, nil
@@ -118,16 +120,27 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 // Encrypt encrypts the string X over the current FF1 parameters
 // and returns the ciphertext of the same length and format
 func (c Cipher) Encrypt(X string) (string, error) {
+	return c.EncryptWithTweak(X, c.tweak)
+}
+
+// EncryptWithTweak is the same as Encrypt except it uses the
+// tweak from the parameter rather than the current Cipher's tweak
+func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
 	var ok bool
 
 	n := uint32(len(X))
-	t := len(c.tweak)
+	t := len(tweak)
 
 	// Check if message length is within minLength and maxLength bounds
 	if (n < c.minLen) || (n > c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
+	}
+
+	// Make sure the length of given tweak is in range
+	if len(tweak) > c.maxTLen {
+		return ret, errors.New("tweak must be between 0 and given maxTLen, inclusive")
 	}
 
 	radix := c.radix
@@ -205,7 +218,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 	Q := buf[:lenQ]
 	// This is the fixed part of Q
 	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
-	copy(Q[:t], c.tweak)
+	copy(Q[:t], tweak)
 
 	// Use PQ as a combined storage for P||Q
 	// PQ will use the next 16+lenQ bytes of buf
@@ -343,16 +356,27 @@ func (c Cipher) Encrypt(X string) (string, error) {
 // Decrypt decrypts the string X over the current FF1 parameters
 // and returns the plaintext of the same length and format
 func (c Cipher) Decrypt(X string) (string, error) {
+	return c.DecryptWithTweak(X, c.tweak)
+}
+
+// DecryptWithTweak is the same as Decrypt except it uses the
+// tweak from the parameter rather than the current Cipher's tweak
+func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
 	var ok bool
 
 	n := uint32(len(X))
-	t := len(c.tweak)
+	t := len(tweak)
 
 	// Check if message length is within minLength and maxLength bounds
 	if (n < c.minLen) || (n > c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
+	}
+
+	// Make sure the length of given tweak is in range
+	if len(tweak) > c.maxTLen {
+		return ret, errors.New("tweak must be between 0 and given maxTLen, inclusive")
 	}
 
 	radix := c.radix
@@ -430,7 +454,7 @@ func (c Cipher) Decrypt(X string) (string, error) {
 	Q := buf[:lenQ]
 	// This is the fixed part of Q
 	// First t bytes of Q are the tweak, next numPad bytes are already zero-valued
-	copy(Q[:t], c.tweak)
+	copy(Q[:t], tweak)
 
 	// Use PQ as a combined storage for P||Q
 	// PQ will use the next 16+lenQ bytes of buf
