@@ -125,6 +125,9 @@ func (c Cipher) Encrypt(X string) (string, error) {
 
 // EncryptWithTweak is the same as Encrypt except it uses the
 // tweak from the parameter rather than the current Cipher's tweak
+// This allows you to re-use a single Cipher (for a given key) and simply
+// override the tweak for each unique data input, which is a practical
+// use-case of FPE for things like credit card numbers.
 func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
@@ -361,6 +364,9 @@ func (c Cipher) Decrypt(X string) (string, error) {
 
 // DecryptWithTweak is the same as Decrypt except it uses the
 // tweak from the parameter rather than the current Cipher's tweak
+// This allows you to re-use a single Cipher (for a given key) and simply
+// override the tweak for each unique data input, which is a practical
+// use-case of FPE for things like credit card numbers.
 func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
