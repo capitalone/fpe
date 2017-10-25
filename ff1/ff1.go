@@ -45,6 +45,9 @@ var (
 
 	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
 	ErrStringNotInRadix = errors.New("string is not within base/radix")
+
+	// ErrTweakLengthInvalid is returned if the tweak length is not in the given range
+	ErrTweakLengthInvalid = errors.New("tweak must be between 0 and given maxTLen, inclusive")
 )
 
 // Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
@@ -86,7 +89,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 
 	// Make sure the length of given tweak is in range
 	if len(tweak) > maxTLen {
-		return newCipher, errors.New("tweak must be between 0 and given maxTLen, inclusive")
+		return newCipher, ErrTweakLengthInvalid
 	}
 
 	// Calculate minLength
@@ -143,7 +146,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 
 	// Make sure the length of given tweak is in range
 	if len(tweak) > c.maxTLen {
-		return ret, errors.New("tweak must be between 0 and given maxTLen, inclusive")
+		return ret, ErrTweakLengthInvalid
 	}
 
 	radix := c.radix
@@ -382,7 +385,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 
 	// Make sure the length of given tweak is in range
 	if len(tweak) > c.maxTLen {
-		return ret, errors.New("tweak must be between 0 and given maxTLen, inclusive")
+		return ret, ErrTweakLengthInvalid
 	}
 
 	radix := c.radix
