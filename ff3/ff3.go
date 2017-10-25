@@ -40,11 +40,11 @@ const (
 )
 
 var (
-	// For all AES-CBC calls, IV is always 0
-	ivZero = make([]byte, blockSize)
-
 	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
 	ErrStringNotInRadix = errors.New("string is not within base/radix")
+
+	// ErrTweakLengthInvalid is returned if the tweak length is not 8 bytes
+	ErrTweakLengthInvalid = errors.New("tweak must be 8 bytes, or 64 bits")
 )
 
 // A Cipher is an instance of the FF3 mode of format preserving encryption
@@ -78,7 +78,7 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 
 	// Make sure the given the length of tweak in bits is 64
 	if len(tweak) != tweakLen {
-		return newCipher, errors.New("tweak must be 8 bytes, or 64 bits")
+		return newCipher, ErrTweakLengthInvalid
 	}
 
 	// Calculate minLength - according to the spec, radix^minLength >= 100.
@@ -110,6 +110,15 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 // Encrypt encrypts the string X over the current FF3 parameters
 // and returns the ciphertext of the same length and format
 func (c Cipher) Encrypt(X string) (string, error) {
+	return c.EncryptWithTweak(X, c.tweak)
+}
+
+// EncryptWithTweak is the same as Encrypt except it uses the
+// tweak from the parameter rather than the current Cipher's tweak
+// This allows you to re-use a single Cipher (for a given key) and simply
+// override the tweak for each unique data input, which is a practical
+// use-case of FPE for things like credit card numbers.
+func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var ok bool
 
@@ -120,6 +129,11 @@ func (c Cipher) Encrypt(X string) (string, error) {
 	// the input check to >= instead of only >
 	if (n < c.minLen) || (n >= c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
+	}
+
+	// Make sure the given the length of tweak in bits is 64
+	if len(tweak) != tweakLen {
+		return ret, ErrTweakLengthInvalid
 	}
 
 	radix := c.radix
@@ -140,8 +154,8 @@ func (c Cipher) Encrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Split the tweak
-	Tl := c.tweak[:halfTweakLen]
-	Tr := c.tweak[halfTweakLen:]
+	Tl := tweak[:halfTweakLen]
+	Tr := tweak[halfTweakLen:]
 
 	// P is always 16 bytes
 	var (
@@ -245,6 +259,15 @@ func (c Cipher) Encrypt(X string) (string, error) {
 // Decrypt decrypts the string X over the current FF3 parameters
 // and returns the plaintext of the same length and format
 func (c Cipher) Decrypt(X string) (string, error) {
+	return c.DecryptWithTweak(X, c.tweak)
+}
+
+// DecryptWithTweak is the same as Decrypt except it uses the
+// tweak from the parameter rather than the current Cipher's tweak
+// This allows you to re-use a single Cipher (for a given key) and simply
+// override the tweak for each unique data input, which is a practical
+// use-case of FPE for things like credit card numbers.
+func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var ok bool
 
@@ -255,6 +278,11 @@ func (c Cipher) Decrypt(X string) (string, error) {
 	// the input check to >= instead of only >
 	if (n < c.minLen) || (n >= c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
+	}
+
+	// Make sure the given the length of tweak in bits is 64
+	if len(tweak) != tweakLen {
+		return ret, ErrTweakLengthInvalid
 	}
 
 	radix := c.radix
@@ -275,8 +303,8 @@ func (c Cipher) Decrypt(X string) (string, error) {
 	B := X[u:]
 
 	// Split the tweak
-	Tl := c.tweak[:halfTweakLen]
-	Tr := c.tweak[halfTweakLen:]
+	Tl := tweak[:halfTweakLen]
+	Tr := tweak[halfTweakLen:]
 
 	// P is always 16 bytes
 	var (
