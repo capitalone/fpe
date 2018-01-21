@@ -28,6 +28,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"strings"
 )
 
 // Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
@@ -348,11 +349,9 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	A = numA.Text(radix)
 	B = numB.Text(radix)
 
-	// Pad B properly
-	// TODO: improve this, but don't import "strings" just for it
-	for len(B) < int(v) {
-		B = "0" + B
-	}
+	// Pad both A and B properly
+	A = strings.Repeat("0", int(u)-len(A)) + A
+	B = strings.Repeat("0", int(v)-len(B)) + B
 
 	ret = A + B
 
@@ -587,11 +586,9 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	A = numA.Text(radix)
 	B = numB.Text(radix)
 
-	// Pad A properly
-	// TODO: improve this, but don't import "strings" just for it
-	for len(A) < int(u) {
-		A = "0" + A
-	}
+	// Pad both A and B properly
+	A = strings.Repeat("0", int(u)-len(A)) + A
+	B = strings.Repeat("0", int(v)-len(B)) + B
 
 	ret = A + B
 

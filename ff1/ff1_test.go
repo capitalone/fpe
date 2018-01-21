@@ -204,6 +204,34 @@ func TestLong(t *testing.T) {
 	}
 }
 
+// Regression test for issue 14: https://github.com/capitalone/fpe/issues/14
+func TestIssue14(t *testing.T) {
+	key, err := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
+
+	tweak, err := hex.DecodeString("D8E7920AFA330A73")
+
+	ff1, err := NewCipher(2, 8, key, tweak)
+	if err != nil {
+		t.Fatalf("Unable to create cipher: %v", err)
+	}
+
+	plaintext := "11111010"
+
+	ciphertext, err := ff1.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	decrypted, err := ff1.Decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	if plaintext != decrypted {
+		t.Fatalf("Issue 14 Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
+	}
+}
+
 // Note: panic(err) is just used for example purposes.
 func ExampleCipher_Encrypt() {
 	// Key and tweak should be byte arrays. Put your key and tweak here.
