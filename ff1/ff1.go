@@ -168,7 +168,6 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	B := X[u:]
 
 	// Byte lengths
-	// TODO: can these calculations be done more efficiently?
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
@@ -218,8 +217,6 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	totalBufLen := lenQ + lenPQ + (maxJ-1)*blockSize
 	buf := make([]byte, totalBufLen)
 
-	// TODO: small inputs will likely cause Q length to be 16,
-	// could start with that with larger cap and expand as necessary?
 	// Q will use the first lenQ bytes of buf
 	// Only the last b+1 bytes of Q change for each loop iteration
 	Q := buf[:lenQ]
@@ -405,7 +402,6 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	B := X[u:]
 
 	// Byte lengths
-	// TODO: can these calculations be done more efficiently?
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
 	d := int(4*math.Ceil(float64(b)/4) + 4)
 
@@ -455,8 +451,6 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	totalBufLen := lenQ + lenPQ + (maxJ-1)*blockSize
 	buf := make([]byte, totalBufLen)
 
-	// TODO: small inputs will likely cause Q length to be 16,
-	// could start with that with larger cap and expand as necessary?
 	// Q will use the first lenQ bytes of buf
 	// Only the last b+1 bytes of Q change for each loop iteration
 	Q := buf[:lenQ]
