@@ -79,7 +79,6 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 
 // NewCipherWithKey is the same as the original NewCipher
 // It exists just for consistency of naming and signatures with other methods
-// TODO: should this API be NewCipherWithKey or NewCipherFromKey?
 func NewCipherWithKey(key []byte, radix int, maxTLen int, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
@@ -103,7 +102,6 @@ func NewCipherWithKey(key []byte, radix int, maxTLen int, tweak []byte) (Cipher,
 // via a cipher.Block parameter.
 // This allows you to use a custom AES block implementation,
 // which is expected to be valid (non-nil)
-// TODO: should this API be NewCipherWithBlock or NewCipherFromBlock?
 func NewCipherWithBlock(aesBlock cipher.Block, radix int, maxTLen int, tweak []byte) (Cipher, error) {
 	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
@@ -119,7 +117,6 @@ func NewCipherWithBlock(aesBlock cipher.Block, radix int, maxTLen int, tweak []b
 // via a cipher.BlockMode parameter.
 // This allows you to use a custom CBC encryptor implementation,
 // which is expected to be valid (non-nil), and implement a SetIV method
-// TODO: should this API be NewCipherWithBlockMode or NewCipherFromBlockMode?
 func NewCipherWithBlockMode(cbcEncryptor BlockModeWithSetIV, radix int, maxTLen int, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
