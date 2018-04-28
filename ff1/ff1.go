@@ -82,6 +82,34 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
+	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
+	aesBlock, err := aes.NewCipher(key)
+	if err != nil {
+		return newCipher, errors.New("failed to create AES block")
+	}
+
+	return NewCipherWithBlock(aesBlock, radix, maxTLen, tweak)
+}
+
+// NewCipherWithBlock is like NewCipher except that it uses an AES block
+// via a cipher.Block parameter.
+// This allows you to use a custom AES block implementation,
+// which is expected to be valid (non-nil)
+// TODO: should this API be NewCipherWithBlock or NewCipherFromBlock?
+func NewCipherWithBlock(aesBlock cipher.Block, radix int, maxTLen int, tweak []byte) (Cipher, error) {
+	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
+
+	return NewCipherWithBlockMode(cbcEncryptor, radix, maxTLen, tweak)
+}
+
+// NewCipherWithBlockMode is like NewCipher except that it uses a CBC encryptor
+// via a cipher.BlockMode parameter.
+// This allows you to use a custom CBC encryptor implementation,
+// which is expected to be valid (non-nil), and implement a SetIV method
+// TODO: should this API be NewCipherWithBlockMode or NewCipherFromBlockMode?
+func NewCipherWithBlockMode(cbcEncryptor cipher.BlockMode, radix int, maxTLen int, tweak []byte) (Cipher, error) {
+	var newCipher Cipher
+
 	// While FF1 allows radices in [2, 2^16],
 	// realistically there's a practical limit based on the alphabet that can be passed in
 	if (radix < 2) || (radix > big.MaxBase) {
@@ -102,14 +130,6 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 	if (minLen < 2) || (maxLen < minLen) || (maxLen > math.MaxUint32) {
 		return newCipher, errors.New("minLen invalid, adjust your radix")
 	}
-
-	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
-	aesBlock, err := aes.NewCipher(key)
-	if err != nil {
-		return newCipher, errors.New("failed to create AES block")
-	}
-
-	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
 	newCipher.tweak = tweak
 	newCipher.radix = radix
@@ -602,7 +622,11 @@ func (c Cipher) ciph(input []byte) ([]byte, error) {
 	c.cbcEncryptor.CryptBlocks(input, input)
 
 	// Reset IV to 0
-	c.cbcEncryptor.(cbcMode).SetIV(ivZero)
+	cbc, ok := c.cbcEncryptor.(cbcMode)
+	if !ok {
+		return nil, errors.New("cbcEncryptor does not implement SetIV function")
+	}
+	cbc.SetIV(ivZero)
 
 	return input, nil
 }
