@@ -125,9 +125,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	n := uint32(len(X))
 
 	// Check if message length is within minLength and maxLength bounds
-	// TODO BUG: when n==c.maxLen, it breaks. For now, I'm changing
-	// the input check to >= instead of only >
-	if (n < c.minLen) || (n >= c.maxLen) {
+	if (n < c.minLen) || (n > c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 
@@ -274,9 +272,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	n := uint32(len(X))
 
 	// Check if message length is within minLength and maxLength bounds
-	// TODO BUG: when n==c.maxLen, it breaks. For now, I'm changing
-	// the input check to >= instead of only >
-	if (n < c.minLen) || (n >= c.maxLen) {
+	if (n < c.minLen) || (n > c.maxLen) {
 		return ret, errors.New("message length is not within min and max bounds")
 	}
 

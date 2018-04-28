@@ -204,6 +204,45 @@ func TestDecrypt(t *testing.T) {
 	}
 }
 
+// This is a regression test for ensuring that encryption/decryption
+// doesn't fail when the input length is equal to the chose max length
+func TestMaxLengthEqual(t *testing.T) {
+
+	key, err := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
+	if err != nil {
+		t.Fatalf("Unable to decode hex key: %v", "EF4359D8D580AA4F7F036D6F04FC6A94")
+	}
+
+	tweak, err := hex.DecodeString("D8E7920AFA330A73")
+	if err != nil {
+		t.Fatalf("Unable to decode tweak: %v", "D8E7920AFA330A73")
+	}
+
+	ff3, err := NewCipher(16, key, tweak)
+	if err != nil {
+		t.Fatalf("Unable to create cipher: %v", err)
+	}
+
+	// length of this string is 48
+	// 48 is calculated as the maxLen in NewCipher since
+	// floor(192/log2(radix)) = floor(192/log(16)) = floor(192/4) = 48
+	plaintext := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	ciphertext, err := ff3.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Failed to encrypt: %v", err)
+	}
+
+	decrypted, err := ff3.Decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("Failed to decrypt %v", err)
+	}
+
+	if decrypted != plaintext {
+		t.Fatalf("Decrypted ciphertext did not match plaintext")
+	}
+}
+
 // Note: panic(err) is just used for example purposes.
 func ExampleCipher_Encrypt() {
 	// Key and tweak should be byte arrays. Put your key and tweak here.
