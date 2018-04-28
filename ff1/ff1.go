@@ -51,7 +51,8 @@ var (
 	ErrTweakLengthInvalid = errors.New("tweak must be between 0 and given maxTLen, inclusive")
 )
 
-// Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
+// Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't
+// TODO: rename this to something more meaningful like BlockModeWithSetIV or CBCWithSetIV
 type cbcMode interface {
 	cipher.BlockMode
 	SetIV([]byte)
@@ -67,12 +68,19 @@ type Cipher struct {
 	maxTLen int
 
 	// Re-usable CBC encryptor with exported SetIV function
-	cbcEncryptor cipher.BlockMode
+	cbcEncryptor cbcMode
 }
 
 // NewCipher initializes a new FF1 Cipher for encryption or decryption use
 // based on the radix, max tweak length, key and tweak parameters.
 func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+	return NewCipherWithKey(key, radix, maxTLen, tweak)
+}
+
+// NewCipherWithKey is the same as the original NewCipher
+// It exists just for consistency of naming and signatures with other methods
+// TODO: should this API be NewCipherWithKey or NewCipherFromKey?
+func NewCipherWithKey(key []byte, radix int, maxTLen int, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)
@@ -99,7 +107,12 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 func NewCipherWithBlock(aesBlock cipher.Block, radix int, maxTLen int, tweak []byte) (Cipher, error) {
 	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
-	return NewCipherWithBlockMode(cbcEncryptor, radix, maxTLen, tweak)
+	cbc, ok := cbcEncryptor.(cbcMode)
+	if !ok {
+		return Cipher{}, errors.New("cbcEncryptor does not implement SetIV function")
+	}
+
+	return NewCipherWithBlockMode(cbc, radix, maxTLen, tweak)
 }
 
 // NewCipherWithBlockMode is like NewCipher except that it uses a CBC encryptor
@@ -107,7 +120,7 @@ func NewCipherWithBlock(aesBlock cipher.Block, radix int, maxTLen int, tweak []b
 // This allows you to use a custom CBC encryptor implementation,
 // which is expected to be valid (non-nil), and implement a SetIV method
 // TODO: should this API be NewCipherWithBlockMode or NewCipherFromBlockMode?
-func NewCipherWithBlockMode(cbcEncryptor cipher.BlockMode, radix int, maxTLen int, tweak []byte) (Cipher, error) {
+func NewCipherWithBlockMode(cbcEncryptor cbcMode, radix int, maxTLen int, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	// While FF1 allows radices in [2, 2^16],
@@ -622,11 +635,7 @@ func (c Cipher) ciph(input []byte) ([]byte, error) {
 	c.cbcEncryptor.CryptBlocks(input, input)
 
 	// Reset IV to 0
-	cbc, ok := c.cbcEncryptor.(cbcMode)
-	if !ok {
-		return nil, errors.New("cbcEncryptor does not implement SetIV function")
-	}
-	cbc.SetIV(ivZero)
+	c.cbcEncryptor.SetIV(ivZero)
 
 	return input, nil
 }
