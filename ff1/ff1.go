@@ -85,6 +85,8 @@ func NewCipherWithKey(key []byte, radix int, maxTLen int, tweak []byte) (Cipher,
 	keyLen := len(key)
 
 	// Check if the key is 128, 192, or 256 bits = 16, 24, or 32 bytes
+	// This is only done because aes.NewCipher will panic; it's better to
+	// catch the possible error earlier
 	if (keyLen != 16) && (keyLen != 24) && (keyLen != 32) {
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}

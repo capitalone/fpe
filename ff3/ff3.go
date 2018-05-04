@@ -62,14 +62,41 @@ type Cipher struct {
 // NewCipher initializes a new FF3 Cipher for encryption or decryption use
 // based on the radix, key and tweak parameters.
 func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
+	return NewCipherWithKey(key, radix, tweak)
+}
+
+// NewCipherWithKey is the same as the original NewCipher
+// It exists just for consistency of naming and signatures with other methods
+func NewCipherWithKey(key []byte, radix int, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)
 
 	// Check if the key is 128, 192, or 256 bits = 16, 24, or 32 bytes
+	// This is only done because aes.NewCipher will panic; it's better to
+	// catch the possible error earlier
 	if (keyLen != 16) && (keyLen != 24) && (keyLen != 32) {
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
+
+	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
+	// Always use the reversed key since Encrypt and Decrypt call ciph expecting that
+	aesBlock, err := aes.NewCipher(revB(key))
+	if err != nil {
+		return newCipher, errors.New("failed to create AES block")
+	}
+
+	return NewCipherWithBlock(aesBlock, radix, tweak)
+}
+
+// NewCipherWithBlock is like NewCipher except that it uses an AES block
+// via a cipher.Block parameter.
+// This allows you to use a custom AES block implementation,
+// which is expected to be valid (non-nil)
+// Further, the block must have been made using the reverse of the key
+// See the usage of revB(key) in NewCipherWithKey for an example
+func NewCipherWithBlock(aesBlock cipher.Block, radix int, tweak []byte) (Cipher, error) {
+	var newCipher Cipher
 
 	// While FF3 allows radices in [2, 2^16], there is a practical limit to 36 (alphanumeric) because the Go math/big library only supports up to base 36.
 	if (radix < 2) || (radix > big.MaxBase) {
@@ -89,13 +116,6 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 	// Make sure 2 <= minLength <= maxLength < 2*floor(log base radix of 2^96) is satisfied
 	if (minLen < 2) || (maxLen < minLen) || (float64(maxLen) > (192 / math.Log2(float64(radix)))) {
 		return newCipher, errors.New("minLen or maxLen invalid, adjust your radix")
-	}
-
-	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
-	// Always use the reversed key since Encrypt and Decrypt call ciph expecting that
-	aesBlock, err := aes.NewCipher(revB(key))
-	if err != nil {
-		return newCipher, errors.New("failed to create AES block")
 	}
 
 	newCipher.tweak = tweak
