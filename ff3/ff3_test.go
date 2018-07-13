@@ -246,7 +246,7 @@ func TestMaxLengthEqual(t *testing.T) {
 	}
 }
 
-const letterBytes = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const letterBytes = "1234567890abcdefghijklmnopqrstuvwxyz"
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
@@ -266,14 +266,14 @@ func TestConcurrentEncrypt(t *testing.T) {
 	tweak, err := hex.DecodeString("D8E7920AFA330A73")
 
 	// 16 is an arbitrary number for maxTlen
-	ff3, err := NewCipher(62, key, tweak)
+	ff3, err := NewCipher(36, key, tweak)
 	if err != nil {
 		t.Fatalf("Unable to create cipher: %v", err)
 	}
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 50; i++ {
 		randString := generateRandomString(9)
 		wg.Add(1)
 		go func() {
