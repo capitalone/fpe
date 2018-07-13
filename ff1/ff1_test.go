@@ -114,6 +114,9 @@ var testVectors = []testVector{
 	},
 }
 
+// for mocking / switching between cipher types
+var newTestCipher = NewCipher
+
 func TestEncrypt(t *testing.T) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
@@ -129,7 +132,7 @@ func TestEncrypt(t *testing.T) {
 			}
 
 			// 16 is an arbitrary number for maxTlen
-			ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+			ff1, err := newTestCipher(testVector.radix, 16, key, tweak)
 			if err != nil {
 				t.Fatalf("Unable to create cipher: %v", err)
 			}
@@ -161,7 +164,7 @@ func TestDecrypt(t *testing.T) {
 			}
 
 			// 16 is an arbitrary number for maxTlen
-			ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+			ff1, err := newTestCipher(testVector.radix, 16, key, tweak)
 			if err != nil {
 				t.Fatalf("Unable to create cipher: %v", err)
 			}
@@ -185,7 +188,7 @@ func TestLong(t *testing.T) {
 	tweak, err := hex.DecodeString("")
 
 	// 16 is an arbitrary number for maxTlen
-	ff1, err := NewCipher(36, 16, key, tweak)
+	ff1, err := newTestCipher(36, 16, key, tweak)
 	if err != nil {
 		t.Fatalf("Unable to create cipher: %v", err)
 	}
@@ -213,7 +216,7 @@ func TestIssue14(t *testing.T) {
 
 	tweak, err := hex.DecodeString("D8E7920AFA330A73")
 
-	ff1, err := NewCipher(2, 8, key, tweak)
+	ff1, err := newTestCipher(2, 8, key, tweak)
 	if err != nil {
 		t.Fatalf("Unable to create cipher: %v", err)
 	}
@@ -255,7 +258,7 @@ func TestConcurrentEncrypt(t *testing.T) {
 	tweak, err := hex.DecodeString("D8E7920AFA330A73")
 
 	// 16 is an arbitrary number for maxTlen
-	ff1, err := NewCipher(36, 16, key, tweak)
+	ff1, err := newTestCipher(36, 16, key, tweak)
 	if err != nil {
 		t.Fatalf("Unable to create cipher: %v", err)
 	}
@@ -301,7 +304,7 @@ func ExampleCipher_Encrypt() {
 
 	// Create a new FF1 cipher "object"
 	// 10 is the radix/base, and 8 is the tweak length.
-	FF1, err := NewCipher(10, 8, key, tweak)
+	FF1, err := newTestCipher(10, 8, key, tweak)
 	if err != nil {
 		panic(err)
 	}
@@ -333,7 +336,7 @@ func ExampleCipher_Decrypt() {
 
 	// Create a new FF1 cipher "object"
 	// 10 is the radix/base, and 8 is the tweak length.
-	FF1, err := NewCipher(10, 8, key, tweak)
+	FF1, err := newTestCipher(10, 8, key, tweak)
 	if err != nil {
 		panic(err)
 	}
@@ -349,7 +352,7 @@ func ExampleCipher_Decrypt() {
 	// Output: 0123456789
 }
 
-func BenchmarkNewCipher(b *testing.B) {
+func BenchmarknewTestCipher(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
 		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
@@ -367,7 +370,7 @@ func BenchmarkNewCipher(b *testing.B) {
 
 			// 16 is an arbitrary number for maxTlen
 			for n := 0; n < b.N; n++ {
-				NewCipher(testVector.radix, 16, key, tweak)
+				newTestCipher(testVector.radix, 16, key, tweak)
 			}
 		})
 	}
@@ -388,7 +391,7 @@ func BenchmarkEncrypt(b *testing.B) {
 			}
 
 			// 16 is an arbitrary number for maxTlen
-			ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+			ff1, err := newTestCipher(testVector.radix, 16, key, tweak)
 			if err != nil {
 				b.Fatalf("Unable to create cipher: %v", err)
 			}
@@ -417,7 +420,7 @@ func BenchmarkDecrypt(b *testing.B) {
 			}
 
 			// 16 is an arbitrary number for maxTlen
-			ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+			ff1, err := newTestCipher(testVector.radix, 16, key, tweak)
 			if err != nil {
 				b.Fatalf("Unable to create cipher: %v", err)
 			}
@@ -449,7 +452,7 @@ func BenchmarkE2ESample7(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		// 16 is an arbitrary number for maxTlen
-		ff1, err := NewCipher(testVector.radix, 16, key, tweak)
+		ff1, err := newTestCipher(testVector.radix, 16, key, tweak)
 		if err != nil {
 			b.Fatalf("Unable to create cipher: %v", err)
 		}
@@ -475,7 +478,7 @@ func BenchmarkEncryptLong(b *testing.B) {
 	tweak, err := hex.DecodeString("")
 
 	// 16 is an arbitrary number for maxTlen
-	ff1, err := NewCipher(36, 16, key, tweak)
+	ff1, err := newTestCipher(36, 16, key, tweak)
 	if err != nil {
 		b.Fatalf("Unable to create cipher: %v", err)
 	}
