@@ -22,7 +22,10 @@ package ff3
 import (
 	"encoding/hex"
 	"fmt"
+	"math/rand"
+	"sync"
 	"testing"
+	"time"
 )
 
 // Test vectors taken from here: http://csrc.nist.gov/groups/ST/toolkit/documents/Examples/FF3samples.pdf
@@ -241,6 +244,57 @@ func TestMaxLengthEqual(t *testing.T) {
 	if decrypted != plaintext {
 		t.Fatalf("Decrypted ciphertext did not match plaintext")
 	}
+}
+
+const letterBytes = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
+func generateRandomString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letterBytes[rand.Intn(len(letterBytes))]
+	}
+	return string(b)
+}
+
+func TestConcurrentEncrypt(t *testing.T) {
+	key, err := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
+
+	tweak, err := hex.DecodeString("D8E7920AFA330A73")
+
+	// 16 is an arbitrary number for maxTlen
+	ff3, err := NewCipher(62, key, tweak)
+	if err != nil {
+		t.Fatalf("Unable to create cipher: %v", err)
+	}
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < 200; i++ {
+		randString := generateRandomString(9)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			encrypted, err := ff3.Encrypt(randString)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			decrypted, err := ff3.Decrypt(encrypted)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if randString != decrypted {
+				t.Fatalf("got %q decrypted, want %q", decrypted, randString)
+			}
+		}()
+	}
+
+	wg.Wait()
 }
 
 // Note: panic(err) is just used for example purposes.
