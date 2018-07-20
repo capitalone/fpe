@@ -29,63 +29,23 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
 )
 
-// Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
-const (
-	feistelMin    = 100
-	numRounds     = 10
-	blockSize     = aes.BlockSize
-	halfBlockSize = blockSize / 2
-	// maxRadix   = 65536 // 2^16
-)
-
-var (
-	// For all AES-CBC calls, IV is always 0
-	ivZero = make([]byte, blockSize)
-
-	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
-	ErrStringNotInRadix = errors.New("string is not within base/radix")
-
-	// ErrTweakLengthInvalid is returned if the tweak length is not in the given range
-	ErrTweakLengthInvalid = errors.New("tweak must be between 0 and given maxTLen, inclusive")
-)
-
-// BlockModeWithSetIV is a custom interface that exposes a CBCEncrypter's SetIV method,
-// which cipher.BlockMode does not have defined
-type BlockModeWithSetIV interface {
-	cipher.BlockMode
-	SetIV([]byte)
-}
-
-type cipherCore struct {
-	tweak   []byte
-	radix   int
-	minLen  uint32
-	maxLen  uint32
-	maxTLen int
-}
-
-// A Cipher is an instance of the FF1 mode of format preserving encryption
+// A CipherWithPool is an instance of the FF1 mode of format preserving encryption
 // using a particular key, radix, and tweak
-// Cipher is NOT safe for concurrent use; you may use a sync.Pool of Cipher objects to add thread safety
-type Cipher struct {
+// It is like Cipher, except it contains a Pool of cbc encrypters, making it safe for concurrent use
+type CipherWithPool struct {
 	cipherCore
 
-	// Re-usable CBC encrypter with exported SetIV function
-	cbcEncrypter BlockModeWithSetIV
+	// pool of cbcEncrypter BlockModeWithSetIV
+	cbcEncrypterPool sync.Pool
 }
 
-// NewCipher initializes a new FF1 Cipher for encryption or decryption use
+// NewCipherWithPool initializes a new FF1 Cipher for encryption or decryption use
 // based on the radix, max tweak length, key and tweak parameters.
-func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
-	return NewCipherWithKey(key, radix, maxTLen, tweak)
-}
-
-// NewCipherWithKey is the same as the original NewCipher
-// It exists just for consistency of naming and signatures with other methods
-func NewCipherWithKey(key []byte, radix int, maxTLen int, tweak []byte) (Cipher, error) {
-	var newCipher Cipher
+func NewCipherWithPool(key []byte, radix int, maxTLen int, tweak []byte) (*CipherWithPool, error) {
+	var newCipher CipherWithPool
 
 	keyLen := len(key)
 
@@ -93,51 +53,24 @@ func NewCipherWithKey(key []byte, radix int, maxTLen int, tweak []byte) (Cipher,
 	// This is only done because aes.NewCipher will panic; it's better to
 	// catch the possible error earlier
 	if (keyLen != 16) && (keyLen != 24) && (keyLen != 32) {
-		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
+		return &newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
 	// aes.NewCipher automatically returns the correct block based on the length of the key passed in
 	aesBlock, err := aes.NewCipher(key)
 	if err != nil {
-		return newCipher, errors.New("failed to create AES block")
+		return &newCipher, errors.New("failed to create AES block")
 	}
-
-	return NewCipherWithBlock(aesBlock, radix, maxTLen, tweak)
-}
-
-// NewCipherWithBlock is like NewCipher except that it uses an AES block
-// via a cipher.Block parameter.
-// This allows you to use a custom AES block implementation,
-// which is expected to be valid (non-nil)
-func NewCipherWithBlock(aesBlock cipher.Block, radix int, maxTLen int, tweak []byte) (Cipher, error) {
-	// NOTE: cipher.BlockCipher, specifically the CBC encrypter is NOT safe for concurrent use
-	// This is because of some internal state it keeps like the iv
-	cbcEncrypter := cipher.NewCBCEncrypter(aesBlock, ivZero)
-
-	cbc, ok := cbcEncrypter.(BlockModeWithSetIV)
-	if !ok {
-		return Cipher{}, errors.New("cbcEncrypter does not implement SetIV function")
-	}
-
-	return NewCipherWithBlockMode(cbc, radix, maxTLen, tweak)
-}
-
-// NewCipherWithBlockMode is like NewCipher except that it uses a CBC encrypter
-// via a cipher.BlockMode parameter.
-// This allows you to use a custom CBC encrypter implementation,
-// which is expected to be valid (non-nil), and implement a SetIV method
-func NewCipherWithBlockMode(cbcEncrypter BlockModeWithSetIV, radix int, maxTLen int, tweak []byte) (Cipher, error) {
-	var newCipher Cipher
 
 	// While FF1 allows radices in [2, 2^16],
 	// realistically there's a practical limit based on the alphabet that can be passed in
 	if (radix < 2) || (radix > big.MaxBase) {
-		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
+		return &newCipher, errors.New("radix must be between 2 and 36, inclusive")
 	}
 
 	// Make sure the length of given tweak is in range
 	if len(tweak) > maxTLen {
-		return newCipher, ErrTweakLengthInvalid
+		return &newCipher, ErrTweakLengthInvalid
 	}
 
 	// Calculate minLength
@@ -147,7 +80,7 @@ func NewCipherWithBlockMode(cbcEncrypter BlockModeWithSetIV, radix int, maxTLen 
 
 	// Make sure 2 <= minLength <= maxLength < 2^32 is satisfied
 	if (minLen < 2) || (maxLen < minLen) || (maxLen > math.MaxUint32) {
-		return newCipher, errors.New("minLen invalid, adjust your radix")
+		return &newCipher, errors.New("minLen invalid, adjust your radix")
 	}
 
 	newCipher.tweak = tweak
@@ -155,14 +88,18 @@ func NewCipherWithBlockMode(cbcEncrypter BlockModeWithSetIV, radix int, maxTLen 
 	newCipher.minLen = minLen
 	newCipher.maxLen = maxLen
 	newCipher.maxTLen = maxTLen
-	newCipher.cbcEncrypter = cbcEncrypter
+	newCipher.cbcEncrypterPool = sync.Pool{
+		New: func() interface{} {
+			return cipher.NewCBCEncrypter(aesBlock, ivZero).(BlockModeWithSetIV)
+		},
+	}
 
-	return newCipher, nil
+	return &newCipher, nil
 }
 
 // Encrypt encrypts the string X over the current FF1 parameters
 // and returns the ciphertext of the same length and format
-func (c Cipher) Encrypt(X string) (string, error) {
+func (c *CipherWithPool) Encrypt(X string) (string, error) {
 	return c.EncryptWithTweak(X, c.tweak)
 }
 
@@ -171,7 +108,7 @@ func (c Cipher) Encrypt(X string) (string, error) {
 // This allows you to re-use a single Cipher (for a given key) and simply
 // override the tweak for each unique data input, which is a practical
 // use-case of FPE for things like credit card numbers.
-func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
+func (c *CipherWithPool) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
 	var ok bool
@@ -396,7 +333,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 
 // Decrypt decrypts the string X over the current FF1 parameters
 // and returns the plaintext of the same length and format
-func (c Cipher) Decrypt(X string) (string, error) {
+func (c *CipherWithPool) Decrypt(X string) (string, error) {
 	return c.DecryptWithTweak(X, c.tweak)
 }
 
@@ -405,7 +342,7 @@ func (c Cipher) Decrypt(X string) (string, error) {
 // This allows you to re-use a single Cipher (for a given key) and simply
 // override the tweak for each unique data input, which is a practical
 // use-case of FPE for things like credit card numbers.
-func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
+func (c *CipherWithPool) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
 	var ok bool
@@ -631,24 +568,28 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 // ciph defines how the main block cipher is called.
 // When prf calls this, it will likely be a multi-block input, in which case ciph behaves as CBC mode with IV=0.
 // When called otherwise, it is guaranteed to be a single-block (16-byte) input because that's what the algorithm dictates. In this situation, ciph behaves as ECB mode
-func (c Cipher) ciph(input []byte) ([]byte, error) {
+func (c *CipherWithPool) ciph(input []byte) ([]byte, error) {
 	// These are checked here manually because the CryptBlocks function panics rather than returning an error
 	// So, catch the potential error earlier
 	if len(input)%blockSize != 0 {
 		return nil, errors.New("length of ciph input must be multiple of 16")
 	}
 
-	c.cbcEncrypter.CryptBlocks(input, input)
+	cbcEncrypter := c.cbcEncrypterPool.Get().(BlockModeWithSetIV)
+
+	cbcEncrypter.CryptBlocks(input, input)
 
 	// Reset IV to 0
-	c.cbcEncrypter.SetIV(ivZero)
+	cbcEncrypter.SetIV(ivZero)
+
+	c.cbcEncrypterPool.Put(cbcEncrypter)
 
 	return input, nil
 }
 
 // PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
 // PRF always outputs 16 bytes (one block)
-func (c Cipher) prf(input []byte) ([]byte, error) {
+func (c *CipherWithPool) prf(input []byte) ([]byte, error) {
 	cipher, err := c.ciph(input)
 	if err != nil {
 		return nil, err

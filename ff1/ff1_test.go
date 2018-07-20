@@ -115,7 +115,10 @@ var testVectors = []testVector{
 }
 
 // for mocking / switching between cipher types
-var newTestCipher = NewCipher
+// var newTestCipher = NewCipher
+var newTestCipher = func(radix int, maxTLen int, key []byte, tweak []byte) (*CipherWithPool, error) {
+	return NewCipherWithPool(key, radix, maxTLen, tweak)
+}
 
 func TestEncrypt(t *testing.T) {
 	for idx, testVector := range testVectors {
