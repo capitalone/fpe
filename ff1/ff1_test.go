@@ -355,7 +355,7 @@ func ExampleCipher_Decrypt() {
 	// Output: 0123456789
 }
 
-func BenchmarknewTestCipher(b *testing.B) {
+func BenchmarkNewTestCipher(b *testing.B) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
 		b.Run(fmt.Sprintf("Sample%d", sampleNumber), func(b *testing.B) {
