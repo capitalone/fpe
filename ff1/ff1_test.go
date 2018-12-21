@@ -148,7 +148,6 @@ func TestEncrypt(t *testing.T) {
 	}
 }
 
-/* 
 func TestDecrypt(t *testing.T) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
@@ -439,4 +438,3 @@ func BenchmarkEncryptLong(b *testing.B) {
 	}
 }
 
-*/

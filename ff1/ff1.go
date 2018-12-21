@@ -28,7 +28,6 @@ import (
 	"errors"
 	"math"
 	"math/big"
-	"strings"
 	"github.com/martin/fpe"
 	"fmt"
 )
@@ -206,7 +205,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	binary.BigEndian.PutUint32(P[8:12], n)
 	binary.BigEndian.PutUint32(P[12:lenP], uint32(t))
 
-	// Determinte lengths of byte slices
+	// Determine lengths of byte slices
 
 	// Q's length is known to always be t+b+1+numPad, to be multiple of 16
 	lenQ := t + b + 1 + numPad
@@ -370,9 +369,16 @@ func (c Cipher) Decrypt(X string) (string, error) {
 func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
-	var ok bool
 
-	n := uint32(len(X))
+	// String X contains a sequence of characters, where some characters
+        // might take up multiple bytes. Convert into an array of indices into 
+	// the alphabet embedded in the codec.
+	Xn, err := c.codec.Encode(X)
+	if err != nil {
+		return ret, ErrStringNotInRadix
+	}
+
+	n := uint32(len(Xn))
 	t := len(tweak)
 
 	// Check if message length is within minLength and maxLength bounds
@@ -385,22 +391,15 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		return ret, ErrTweakLengthInvalid
 	}
 
-	radix := c.radix
-
-	// Check if the message is in the current radix
-	var numX big.Int
-	_, ok = numX.SetString(X, radix)
-	if !ok {
-		return ret, ErrStringNotInRadix
-	}
+	radix := c.codec.Radix()
 
 	// Calculate split point
 	u := n / 2
 	v := n - u
 
 	// Split the message
-	A := X[:u]
-	B := X[u:]
+	A := Xn[:u]
+	B := Xn[u:]
 
 	// Byte lengths
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
@@ -432,7 +431,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	binary.BigEndian.PutUint32(P[8:12], n)
 	binary.BigEndian.PutUint32(P[12:lenP], uint32(t))
 
-	// Determinte lengths of byte slices
+	// Determine lengths of byte slices
 
 	// Q's length is known to always be t+b+1+numPad, to be multiple of 16
 	lenQ := t + b + 1 + numPad
@@ -497,13 +496,13 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	_, ok = numA.SetString(A, radix)
-	if !ok {
+	numA, err = fpe.Num(A,uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	_, ok = numB.SetString(B, radix)
-	if !ok {
+	numB, err = fpe.Num(B,uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
@@ -578,16 +577,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		numA = numC
 	}
 
-	A = numA.Text(radix)
-	B = numB.Text(radix)
-
-	// Pad both A and B properly
-	A = strings.Repeat("0", int(u)-len(A)) + A
-	B = strings.Repeat("0", int(v)-len(B)) + B
-
-	ret = A + B
-
-	return ret, nil
+	return fpe.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
 }
 
 // ciph defines how the main block cipher is called.
