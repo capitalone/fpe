@@ -26,10 +26,10 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"github.com/capitalone/fpe"
 	"math"
 	"math/big"
-	"github.com/martin/fpe"
-	"fmt"
 )
 
 // Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
@@ -72,9 +72,19 @@ type Cipher struct {
 	cbcEncryptor cipher.BlockMode
 }
 
-// NewCipher initializes a new FF1 Cipher for encryption or decryption use
-// based on the radix, max tweak length, key and tweak parameters.
-func NewCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+const (
+	// from func (*big.Int)SetString
+	legacy_alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRTSUVWXYZ"
+)
+
+// NewCipher is provided for backwards compatibility for old client code.
+func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+	return NewAlphaCipher(legacy_alphabet[:radix], maxTLen, key, tweak)
+}
+
+// NewAlphaCipher initializes a new FF1 Cipher for encryption or decryption use
+// based on the alphabet, max tweak length, key and tweak parameters.
+func NewAlphaCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)
@@ -86,7 +96,7 @@ func NewCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, 
 
 	codec, err := fpe.NewCodec(alphabet)
 	if err != nil {
-		return newCipher, fmt.Errorf("error making codec: %s", err )
+		return newCipher, fmt.Errorf("error making codec: %s", err)
 	}
 
 	radix := codec.Radix()
@@ -145,13 +155,13 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var err error
 
 	// String X contains a sequence of characters, where some characters
-        // might take up multiple bytes. Convert into an array of indices into 
+	// might take up multiple bytes. Convert into an array of indices into
 	// the alphabet embedded in the codec.
 	Xn, err := c.codec.Encode(X)
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
-	
+
 	n := uint32(len(Xn))
 	t := len(tweak)
 
@@ -270,16 +280,15 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	numA, err = fpe.Num(A,uint64(radix))
+	numA, err = fpe.Num(A, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	numB, err = fpe.Num(B,uint64(radix))
+	numB, err = fpe.Num(B, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
-
 
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
@@ -371,7 +380,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var err error
 
 	// String X contains a sequence of characters, where some characters
-        // might take up multiple bytes. Convert into an array of indices into 
+	// might take up multiple bytes. Convert into an array of indices into
 	// the alphabet embedded in the codec.
 	Xn, err := c.codec.Encode(X)
 	if err != nil {
@@ -496,12 +505,12 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	numA, err = fpe.Num(A,uint64(radix))
+	numA, err = fpe.Num(A, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	numB, err = fpe.Num(B,uint64(radix))
+	numB, err = fpe.Num(B, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}

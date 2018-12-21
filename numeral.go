@@ -17,7 +17,7 @@ See the License for the specific language governing permissions and limitations 
 
 */
 
-// Package fpe provides some encoding helpers for use 
+// Package fpe provides some encoding helpers for use
 // in the FF1 and FF3 format-preserving encryption packages.
 package fpe
 
@@ -52,7 +52,7 @@ func Num(s []uint16, radix uint64) (big.Int, error) {
 // The array is arranged with the most significant digint in element 0.
 // The array is built from big.Int x from the least significant digit upwards.  If the supplied
 // array is too short, the most significant digits of x are quietly lost.
-func Str(x *big.Int, r []uint16, radix uint64) ([]uint16,error) {
+func Str(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
 
 	var big_radix, mod, v big.Int
 	if radix > 65536 {
@@ -71,11 +71,11 @@ func Str(x *big.Int, r []uint16, radix uint64) ([]uint16,error) {
 	return r, nil
 }
 
-// DecodeNum constructs a string from indices into the alphabet embedded in the Codec. The indices 
-// are encoded in the big Ints a and b. 
-// len_a and len_b are the number of characters that should be built from the corresponding big Ints. 
-func DecodeNum(a *big.Int, len_a int, b *big.Int, len_b int, c Codec) (string,error) {
-	ret := make([]uint16,len_a+len_b)
+// DecodeNum constructs a string from indices into the alphabet embedded in the Codec. The indices
+// are encoded in the big Ints a and b.
+// len_a and len_b are the number of characters that should be built from the corresponding big Ints.
+func DecodeNum(a *big.Int, len_a int, b *big.Int, len_b int, c Codec) (string, error) {
+	ret := make([]uint16, len_a+len_b)
 	_, err := Str(a, ret[:len_a], uint64(c.Radix()))
 	if err != nil {
 		return "", err
@@ -86,4 +86,3 @@ func DecodeNum(a *big.Int, len_a int, b *big.Int, len_b int, c Codec) (string,er
 	}
 	return c.Decode(ret)
 }
-

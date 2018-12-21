@@ -116,8 +116,8 @@ func TestDecodeError(t *testing.T) {
 	for idx, spec := range testSpec {
 		sampleNumber := idx + 1
 		t.Run(fmt.Sprintf("Sample%d", sampleNumber), func(t *testing.T) {
-			r := make([]uint16, 2)	
-			_,err := Str(spec.intv, r, spec.radix)
+			r := make([]uint16, 2)
+			_, err := Str(spec.intv, r, spec.radix)
 			if err == nil {
 				t.Fatalf("expected error in Str")
 			}
