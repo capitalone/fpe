@@ -29,11 +29,6 @@ import (
 
 // As Golang's sub-tests were introduced in Go 1.7, but this package will work with Go 1.6+, so I'm keeping sub-tests in a separate branch for now.
 
-const (
-	alpha_10 = "0123456789"
-	alpha_36 = "0123456789abcdefghijklmnopqrstuvwxyz"
-)
-
 type testVector struct {
 	radix int
 
@@ -262,7 +257,7 @@ func TestUnicode(t *testing.T) {
 	}
 
 	if plaintext != decrypted {
-		t.Fatalf("Issue 14 Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
+		t.Fatalf("TestUnicode Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
 	}
 }
 
