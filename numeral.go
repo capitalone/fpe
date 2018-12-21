@@ -1,3 +1,24 @@
+/*
+
+SPDX-Copyright: Copyright (c) Capital One Services, LLC
+SPDX-License-Identifier: Apache-2.0
+Copyright 2017 Capital One Services, LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and limitations under the License.
+
+*/
+
+// Package fpe provides some encoding helpers for use 
+// in the FF1 and FF3 format-preserving encryption packages.
 package fpe
 
 import (
@@ -50,21 +71,8 @@ func Str(x *big.Int, r []uint16, radix uint64) ([]uint16,error) {
 	return r, nil
 }
 
-// EncodeNum constructs a big Int that represents the ordinal values of string s 
-// with respect to the alphabet built into the codec.
-func EncodeNum(s string, c Codec) (*big.Int, error) {
-	numeral, err := c.Encode(s)
-	if err != nil {
-		return nil, err
-	}
-	v, err := Num(numeral,uint64(c.Radix()))
-	if err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-// DecodeNum constructs a string from the ordinals encoded in two big Ints.
+// DecodeNum constructs a string from indices into the alphabet embedded in the Codec. The indices 
+// are encoded in the big Ints a and b. 
 // len_a and len_b are the number of characters that should be built from the corresponding big Ints. 
 func DecodeNum(a *big.Int, len_a int, b *big.Int, len_b int, c Codec) (string,error) {
 	ret := make([]uint16,len_a+len_b)
