@@ -29,6 +29,8 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"github.com/martin/fpe"
+	"fmt"
 )
 
 // Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
@@ -61,6 +63,7 @@ type cbcMode interface {
 // using a particular key, radix, and tweak
 type Cipher struct {
 	tweak   []byte
+	codec   fpe.Codec
 	radix   int
 	minLen  uint32
 	maxLen  uint32
@@ -72,7 +75,7 @@ type Cipher struct {
 
 // NewCipher initializes a new FF1 Cipher for encryption or decryption use
 // based on the radix, max tweak length, key and tweak parameters.
-func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+func NewCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)
@@ -82,10 +85,16 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
-	// While FF1 allows radices in [2, 2^16],
-	// realistically there's a practical limit based on the alphabet that can be passed in
-	if (radix < 2) || (radix > big.MaxBase) {
-		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
+	codec, err := fpe.NewCodec(alphabet)
+	if err != nil {
+		return newCipher, fmt.Errorf("error making codec: %s", err )
+	}
+
+	radix := codec.Radix()
+
+	// FF1 allows radices in [2, 2^16],
+	if (radix < 2) || (radix > 65536) {
+		return newCipher, fmt.Errorf("radix must be between 2 and 65536: %d supplied", radix)
 	}
 
 	// Make sure the length of given tweak is in range
@@ -112,7 +121,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
 	newCipher.tweak = tweak
-	newCipher.radix = radix
+	newCipher.codec = codec
 	newCipher.minLen = minLen
 	newCipher.maxLen = maxLen
 	newCipher.maxTLen = maxTLen
@@ -135,9 +144,16 @@ func (c Cipher) Encrypt(X string) (string, error) {
 func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
-	var ok bool
 
-	n := uint32(len(X))
+	// String X contains a sequence of characters, where some characters
+        // might take up multiple bytes. Convert into an array of indices into 
+	// the alphabet embedded in the codec.
+	Xn, err := c.codec.Encode(X)
+	if err != nil {
+		return ret, ErrStringNotInRadix
+	}
+	
+	n := uint32(len(Xn))
 	t := len(tweak)
 
 	// Check if message length is within minLength and maxLength bounds
@@ -150,22 +166,15 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		return ret, ErrTweakLengthInvalid
 	}
 
-	radix := c.radix
-
-	// Check if the message is in the current radix
-	var numX big.Int
-	_, ok = numX.SetString(X, radix)
-	if !ok {
-		return ret, ErrStringNotInRadix
-	}
+	radix := c.codec.Radix()
 
 	// Calculate split point
 	u := n / 2
 	v := n - u
 
 	// Split the message
-	A := X[:u]
-	B := X[u:]
+	A := Xn[:u]
+	B := Xn[u:]
 
 	// Byte lengths
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
@@ -262,15 +271,16 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	_, ok = numA.SetString(A, radix)
-	if !ok {
+	numA, err = fpe.Num(A,uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	_, ok = numB.SetString(B, radix)
-	if !ok {
+	numB, err = fpe.Num(B,uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
+
 
 	// Main Feistel Round, 10 times
 	for i := 0; i < numRounds; i++ {
@@ -343,16 +353,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		numB = numC
 	}
 
-	A = numA.Text(radix)
-	B = numB.Text(radix)
-
-	// Pad both A and B properly
-	A = strings.Repeat("0", int(u)-len(A)) + A
-	B = strings.Repeat("0", int(v)-len(B)) + B
-
-	ret = A + B
-
-	return ret, nil
+	return fpe.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
 }
 
 // Decrypt decrypts the string X over the current FF1 parameters
