@@ -173,7 +173,6 @@ func TestEncrypt(t *testing.T) {
 	}
 }
 
-/*
 func TestDecrypt(t *testing.T) {
 	for idx, testVector := range testVectors {
 		sampleNumber := idx + 1
@@ -205,6 +204,7 @@ func TestDecrypt(t *testing.T) {
 	}
 }
 
+/*
 // Note: panic(err) is just used for example purposes.
 func ExampleCipher_Encrypt() {
 	// Key and tweak should be byte arrays. Put your key and tweak here.
