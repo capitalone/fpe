@@ -48,8 +48,30 @@ func Num(s []uint16, radix uint64) (big.Int, error) {
 	return x, nil
 }
 
+// NumRev constructs a big.Int from an array of uint16, where each element represents
+// one digit in the given radix.  The array is arranged with the least significant digit in element 0,
+// down to the most significant digit in element len-1.
+func NumRev(s []uint16, radix uint64) (big.Int, error) {
+	var big_radix, bv, x big.Int
+	if radix > 65536 {
+		return x, fmt.Errorf("Radix (%d) too big: max supported radix is 65536", radix)
+	}
+
+	maxv := uint16(radix - 1)
+	big_radix.SetUint64(uint64(radix))
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] > maxv {
+			return x, fmt.Errorf("Value at %d out of range: got %d - expected 0..%d", i, s[i], maxv)
+		}
+		bv.SetUint64(uint64(s[i]))
+		x.Mul(&x, &big_radix)
+		x.Add(&x, &bv)
+	}
+	return x, nil
+}
+
 // Str populates an array of uint16 with digits representing big.Int x in the specified radix.
-// The array is arranged with the most significant digint in element 0.
+// The array is arranged with the most significant digit in element 0.
 // The array is built from big.Int x from the least significant digit upwards.  If the supplied
 // array is too short, the most significant digits of x are quietly lost.
 func Str(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
@@ -64,6 +86,28 @@ func Str(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
 	for i := range r {
 		v.DivMod(&v, &big_radix, &mod)
 		r[m-i-1] = uint16(mod.Uint64())
+	}
+	if v.Sign() != 0 {
+		return r, fmt.Errorf("destination array too small: %s remains after conversion", &v)
+	}
+	return r, nil
+}
+
+// StrRev populates an array of uint16 with digits representing big.Int x in the specified radix.
+// The array is arranged with the least significant digit in element 0.
+// The array is built from big.Int x from the least significant digit upwards.  If the supplied
+// array is too short, the most significant digits of x are quietly lost.
+func StrRev(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
+
+	var big_radix, mod, v big.Int
+	if radix > 65536 {
+		return r, fmt.Errorf("Radix (%d) too big: max supported radix os 65536", radix)
+	}
+	v.Set(x)
+	big_radix.SetUint64(radix)
+	for i := range r {
+		v.DivMod(&v, &big_radix, &mod)
+		r[i] = uint16(mod.Uint64())
 	}
 	if v.Sign() != 0 {
 		return r, fmt.Errorf("destination array too small: %s remains after conversion", &v)

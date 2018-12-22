@@ -25,6 +25,8 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"errors"
+	"fmt"
+	"github.com/capitalone/fpe"
 	"math"
 	"math/big"
 )
@@ -51,7 +53,7 @@ var (
 // using a particular key, radix, and tweak
 type Cipher struct {
 	tweak  []byte
-	radix  int
+	codec  fpe.Codec
 	minLen uint32
 	maxLen uint32
 
@@ -59,9 +61,19 @@ type Cipher struct {
 	aesBlock cipher.Block
 }
 
-// NewCipher initializes a new FF3 Cipher for encryption or decryption use
-// based on the radix, key and tweak parameters.
+const (
+	// from func (*big.Int)SetString
+	legacy_alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRTSUVWXYZ"
+)
+
+// NewCipher is provided for backwards compatibility for old client code.
 func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
+	return NewAlphaCipher(legacy_alphabet[:radix], key, tweak)
+}
+
+// NewAlphaCipher initializes a new FF3 Cipher for encryption or decryption use
+// based on the alphabet, max tweak length, key and tweak parameters.
+func NewAlphaCipher(alphabet string, key []byte, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)
@@ -71,9 +83,16 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
-	// While FF3 allows radices in [2, 2^16], there is a practical limit to 36 (alphanumeric) because the Go math/big library only supports up to base 36.
-	if (radix < 2) || (radix > big.MaxBase) {
-		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
+	codec, err := fpe.NewCodec(alphabet)
+	if err != nil {
+		return newCipher, fmt.Errorf("error making codec: %s", err)
+	}
+
+	radix := codec.Radix()
+
+	// FF3 allows radices in [2, 2^16]
+	if (radix < 2) || (radix > 65536) {
+		return newCipher, errors.New("radix must be between 2 and 65536, inclusive")
 	}
 
 	// Make sure the given the length of tweak in bits is 64
@@ -99,7 +118,7 @@ func NewCipher(radix int, key []byte, tweak []byte) (Cipher, error) {
 	}
 
 	newCipher.tweak = tweak
-	newCipher.radix = radix
+	newCipher.codec = codec
 	newCipher.minLen = minLen
 	newCipher.maxLen = maxLen
 	newCipher.aesBlock = aesBlock
@@ -120,9 +139,16 @@ func (c Cipher) Encrypt(X string) (string, error) {
 // use-case of FPE for things like credit card numbers.
 func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
-	var ok bool
 
-	n := uint32(len(X))
+	// String X contains a sequence of characters, where some characters
+	// might take up multiple bytes. Convert into an array of indices into
+	// the alphabet embedded in the codec.
+	Xn, err := c.codec.Encode(X)
+	if err != nil {
+		return ret, ErrStringNotInRadix
+	}
+
+	n := uint32(len(Xn))
 
 	// Check if message length is within minLength and maxLength bounds
 	// TODO BUG: when n==c.maxLen, it breaks. For now, I'm changing
@@ -136,22 +162,18 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		return ret, ErrTweakLengthInvalid
 	}
 
-	radix := c.radix
-
-	// Check if the message is in the current radix
-	var numX big.Int
-	_, ok = numX.SetString(X, radix)
-	if !ok {
-		return ret, ErrStringNotInRadix
-	}
+	radix := c.codec.Radix()
 
 	// Calculate split point
 	u := uint32(math.Ceil(float64(n) / 2))
 	v := n - u
 
 	// Split the message
-	A := X[:u]
-	B := X[u:]
+	A := Xn[:u]
+	B := Xn[u:]
+
+	// C must be large enough to hold either A or B
+	C := make([]uint16, u)
 
 	// Split the tweak
 	Tl := tweak[:halfTweakLen]
@@ -200,8 +222,8 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		P[3] = W[3] ^ byte(i)
 
 		// The remaining 12 bytes of P are for rev(B) with padding
-		_, ok = numB.SetString(rev(B), radix)
-		if !ok {
+		numB, err = fpe.NumRev(B, uint64(radix))
+		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
 
@@ -225,8 +247,8 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		numY.SetBytes(S[:])
 
 		// Calculate c
-		_, ok = numC.SetString(rev(A), radix)
-		if !ok {
+		numC, err = fpe.NumRev(A, uint64(radix))
+		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
 
@@ -238,22 +260,29 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 			numC.Mod(&numC, &numModV)
 		}
 
-		C := numC.Text(c.radix)
-
-		// Need to pad the text with leading 0s first to make sure it's the correct length
-		for len(C) < int(m) {
-			C = "0" + C
+		C = C[:m]
+		_, err := fpe.StrRev(&numC, C, uint64(c.codec.Radix()))
+		if err != nil {
+			return "", err
 		}
-		C = rev(C)
 
 		// Final steps
-		A = B
-		B = C
+		A, B, C = B, C, A
 	}
 
-	ret = A + B
+	// convert the numeral arrays back to strings
+	strA, err := c.codec.Decode(A)
+	if err != nil {
+		return "", err
+	}
 
-	return ret, nil
+	strB, err := c.codec.Decode(B)
+	if err != nil {
+		return "", err
+	}
+
+	return strA + strB, nil
+
 }
 
 // Decrypt decrypts the string X over the current FF3 parameters
@@ -285,7 +314,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		return ret, ErrTweakLengthInvalid
 	}
 
-	radix := c.radix
+	radix := c.codec.Radix()
 
 	// Check if the message is in the current radix
 	var numX big.Int
@@ -390,7 +419,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 			numC.Mod(&numC, &numModV)
 		}
 
-		C := numC.Text(c.radix)
+		C := numC.Text(c.codec.Radix())
 
 		// Need to pad the text with leading 0s first to make sure it's the correct length
 		for len(C) < int(m) {

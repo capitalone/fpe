@@ -67,7 +67,13 @@ func (a *Codec) Radix() int {
 // It is an error for the supplied string to contain characters than are not
 // in the alphabet.
 func (a *Codec) Encode(s string) ([]uint16, error) {
-	ret := make([]uint16, utf8.RuneCountInString(s))
+	n := utf8.RuneCountInString(s)
+	c := n
+	if n%2 == 1 {
+		// ensure the numeral array has even-sized capacity for FF3
+		c++
+	}
+	ret := make([]uint16, n, c)
 
 	var ok bool
 	i := 0
