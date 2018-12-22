@@ -298,9 +298,16 @@ func (c Cipher) Decrypt(X string) (string, error) {
 // use-case of FPE for things like credit card numbers.
 func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
-	var ok bool
 
-	n := uint32(len(X))
+	// String X contains a sequence of characters, where some characters
+	// might take up multiple bytes. Convert into an array of indices into
+	// the alphabet embedded in the codec.
+	Xn, err := c.codec.Encode(X)
+	if err != nil {
+		return ret, ErrStringNotInRadix
+	}
+
+	n := uint32(len(Xn))
 
 	// Check if message length is within minLength and maxLength bounds
 	// TODO BUG: when n==c.maxLen, it breaks. For now, I'm changing
@@ -316,20 +323,16 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 
 	radix := c.codec.Radix()
 
-	// Check if the message is in the current radix
-	var numX big.Int
-	_, ok = numX.SetString(X, radix)
-	if !ok {
-		return ret, ErrStringNotInRadix
-	}
-
 	// Calculate split point
 	u := uint32(math.Ceil(float64(n) / 2))
 	v := n - u
 
 	// Split the message
-	A := X[:u]
-	B := X[u:]
+	A := Xn[:u]
+	B := Xn[u:]
+
+	// C must be large enough to hold either A or B
+	C := make([]uint16, u)
 
 	// Split the tweak
 	Tl := tweak[:halfTweakLen]
@@ -378,8 +381,8 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		P[3] = W[3] ^ byte(i)
 
 		// The remaining 12 bytes of P are for rev(A) with padding
-		_, ok = numA.SetString(rev(A), radix)
-		if !ok {
+		numA, err = fpe.NumRev(A, uint64(radix))
+		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
 
@@ -402,12 +405,9 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		// Calculate numY
 		numY.SetBytes(S[:])
 
-		// Calculate numY
-		numY.SetBytes(S[:])
-
 		// Calculate c
-		_, ok = numC.SetString(rev(B), radix)
-		if !ok {
+		numC, err = fpe.NumRev(B, uint64(radix))
+		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
 
@@ -419,20 +419,28 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 			numC.Mod(&numC, &numModV)
 		}
 
-		C := numC.Text(c.codec.Radix())
-
-		// Need to pad the text with leading 0s first to make sure it's the correct length
-		for len(C) < int(m) {
-			C = "0" + C
+		C = C[:m]
+		_, err := fpe.StrRev(&numC, C, uint64(c.codec.Radix()))
+		if err != nil {
+			return "", err
 		}
-		C = rev(C)
 
 		// Final steps
-		B = A
-		A = C
+		B, A, C = A, C, B
 	}
 
-	return A + B, nil
+	// convert the numeral arrays back to strings
+	strA, err := c.codec.Decode(A)
+	if err != nil {
+		return "", err
+	}
+
+	strB, err := c.codec.Decode(B)
+	if err != nil {
+		return "", err
+	}
+
+	return strA + strB, nil
 }
 
 // rev reverses a string
