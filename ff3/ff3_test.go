@@ -204,7 +204,6 @@ func TestDecrypt(t *testing.T) {
 	}
 }
 
-/*
 // Note: panic(err) is just used for example purposes.
 func ExampleCipher_Encrypt() {
 	// Key and tweak should be byte arrays. Put your key and tweak here.
@@ -323,4 +322,3 @@ func BenchmarkDecrypt(b *testing.B) {
 		})
 	}
 }
-*/
