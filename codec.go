@@ -40,14 +40,14 @@ func NewCodec(s string) (Codec, error) {
 	ret.rtu = make(map[rune]uint16)
 	ret.utr = make([]rune, utf8.RuneCountInString(s))
 
-	var i uint16
+	var i uint32
 	for _, rv := range s {
 		// duplicates are tolerated, but ignored.
 		if _, ok := ret.rtu[rv]; !ok {
 			ret.utr[i] = rv
-			ret.rtu[rv] = i
-			if i == 65535 {
-				return ret, fmt.Errorf("alphabet must contain fewer than 65536 characters")
+			ret.rtu[rv] = uint16(i)
+			if i == 65536 {
+				return ret, fmt.Errorf("alphabet must contain no more than 65536 characters")
 			}
 			i++
 		}

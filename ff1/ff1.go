@@ -116,8 +116,8 @@ func NewAlphaCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cip
 
 	var maxLen uint32 = math.MaxUint32
 
-	// Make sure 2 <= minLength <= maxLength < 2^32 is satisfied
-	if (minLen < 2) || (maxLen < minLen) || (maxLen > math.MaxUint32) {
+	// Make sure minLength <= maxLength < 2^32 is satisfied
+	if (maxLen < minLen) || (maxLen > math.MaxUint32) {
 		return newCipher, errors.New("minLen invalid, adjust your radix")
 	}
 

@@ -20,9 +20,11 @@ See the License for the specific language governing permissions and limitations 
 package fpe
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"testing"
+	"unicode/utf8"
 )
 
 var testCodec = []struct {
@@ -118,8 +120,42 @@ func TestEncoder(t *testing.T) {
 
 			_, err = al.Encode(spec.input)
 			if err == nil {
-				t.Fatalf("Encode unexpectly succeeded: input '%s', alphabet '%s'", spec.input, spec.alphabet)
+				t.Fatalf("Encode unexpectedly succeeded: input '%s', alphabet '%s'", spec.input, spec.alphabet)
 			}
 		})
+	}
+}
+
+func TestLargeAlphabet(t *testing.T) {
+	var alphabet bytes.Buffer
+
+	nr := 0
+	for i := 0; i < 100000; i++ {
+		if utf8.ValidRune(rune(i)) {
+			s := string(rune(i))
+			nr++
+			alphabet.WriteString(s)
+			if nr == 65536 {
+				break
+			}
+		}
+	}
+
+	al, err := NewCodec(alphabet.String())
+	if err != nil {
+		t.Fatalf("Error making codec: %s", err)
+	}
+	if al.Radix() != 65536 {
+		t.Fatalf("Incorrect radix %d ", al.Radix())
+	}
+
+	nml, err := al.Encode("hello world")
+	if err != nil {
+		t.Fatalf("Unable to encode: %s", err)
+	}
+
+	_, err = al.Decode(nml)
+	if err != nil {
+		t.Fatalf("Unable to decode: %s", err)
 	}
 }
