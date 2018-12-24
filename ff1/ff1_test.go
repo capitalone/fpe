@@ -23,9 +23,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 	"unicode/utf8"
-	"strings"
 )
 
 // Test vectors taken from here: http://csrc.nist.gov/groups/ST/toolkit/documents/Examples/FF1samples.pdf
@@ -284,7 +284,7 @@ func TestAlphabetSizes(t *testing.T) {
 			t.Fatalf("Unable to create cipher: %v", err)
 		}
 
-		plaintext := strings.Repeat(string(rune(0)),10)
+		plaintext := strings.Repeat(string(rune(0)), 10)
 		ciphertext, err := ff1.Encrypt(plaintext)
 		if err != nil {
 			t.Fatalf("%v", err)
