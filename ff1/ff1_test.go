@@ -20,9 +20,12 @@ See the License for the specific language governing permissions and limitations 
 package ff1
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"testing"
+	"unicode/utf8"
+	"strings"
 )
 
 // Test vectors taken from here: http://csrc.nist.gov/groups/ST/toolkit/documents/Examples/FF1samples.pdf
@@ -259,6 +262,68 @@ func TestUnicode(t *testing.T) {
 	if plaintext != decrypted {
 		t.Fatalf("TestUnicode Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
 	}
+}
+
+func TestAlphabetSizes(t *testing.T) {
+	// encryption deals with numeral values encoded in ceil(log(radix))-sized
+	// bit strings, up to 16 bits in length - the number of bits in a uint16.
+	// This test exercises behaviour for all bitstring lengths from 1 to 16.
+
+	key, _ := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
+
+	tweak, _ := hex.DecodeString("D8E7920AFA330A73")
+
+	for s := uint(1); s < 17; s++ {
+		a, err := buildAlphabet(1 << s)
+		if err != nil {
+			t.Fatalf("TestAlphabetSizes: %s", err)
+		}
+
+		ff1, err := NewAlphaCipher(a, 8, key, tweak)
+		if err != nil {
+			t.Fatalf("Unable to create cipher: %v", err)
+		}
+
+		plaintext := strings.Repeat(string(rune(0)),10)
+		ciphertext, err := ff1.Encrypt(plaintext)
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+
+		decrypted, err := ff1.Decrypt(ciphertext)
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+
+		if plaintext != decrypted {
+			t.Fatalf("TestUnicode Decrypt Failed. \n Expected: %v \n Got: %v \n", plaintext, decrypted)
+		}
+
+	}
+
+}
+
+func buildAlphabet(n int) (string, error) {
+	// Not every code-point can be encoded as utf-8 string.
+	// For example u+DC00 - u+DFFF contains "isolated surrogate code points"
+	// that have no string interpretation.
+	// (https://www.unicode.org/charts/PDF/UDC00.pdf)
+	//
+	// Loop through a large number of code points and collect
+	// up to n code points with valid interpretations.
+	var alphabet bytes.Buffer
+	nr := 0
+	for i := 0; i < 100000; i++ {
+		if utf8.ValidRune(rune(i)) {
+			s := string(rune(i))
+			nr++
+			alphabet.WriteString(s)
+			if nr == n {
+				return alphabet.String(), nil
+			}
+		}
+	}
+	return alphabet.String(), fmt.Errorf("Failed to collect %d validrunes: only %d collected", n, nr)
 }
 
 // Note: panic(err) is just used for example purposes.
