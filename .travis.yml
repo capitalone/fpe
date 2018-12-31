@@ -1,7 +1,18 @@
+dist: xenial
+
 language: go
 
 go:
-  - 1.7.x
-  - 1.8.x
-  - 1.9.x
-  - tip
+  - 1.11.x
+
+# Only clone the most recent commit.
+git:
+  depth: 1
+
+before_script:
+  - go get -u golang.org/x/lint/golint
+
+script:
+  - golint ./...
+  - go vet ./...
+  - go test -v -race ./...
