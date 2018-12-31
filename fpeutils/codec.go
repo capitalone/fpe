@@ -22,6 +22,7 @@ See the License for the specific language governing permissions and limitations 
 package fpeutils
 
 import (
+	"bytes"
 	"fmt"
 	"unicode/utf8"
 )
@@ -95,12 +96,13 @@ func (a *Codec) Encode(s string) ([]uint16, error) {
 // It is an error for the array to contain values outside the boundary of the
 // alphabet.
 func (a *Codec) Decode(n []uint16) (string, error) {
-	var ret string
+	var b bytes.Buffer
+
 	for i, v := range n {
 		if v < 0 || int(v) > len(a.utr)-1 {
-			return ret, fmt.Errorf("numeral at position %d out of range: %d not in [0..%d]", i, v, len(a.utr)-1)
+			return "", fmt.Errorf("numeral at position %d out of range: %d not in [0..%d]", i, v, len(a.utr)-1)
 		}
-		ret = ret + string(a.utr[v])
+		b.WriteString(string(a.utr[v]))
 	}
-	return ret, nil
+	return b.String(), nil
 }
