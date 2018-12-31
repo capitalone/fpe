@@ -30,19 +30,19 @@ import (
 // one digit in the given radix.  The array is arranged with the most significant digit in element 0,
 // down to the least significant digit in element len-1.
 func Num(s []uint16, radix uint64) (big.Int, error) {
-	var big_radix, bv, x big.Int
+	var bigRadix, bv, x big.Int
 	if radix > 65536 {
 		return x, fmt.Errorf("Radix (%d) too big: max supported radix is 65536", radix)
 	}
 
 	maxv := uint16(radix - 1)
-	big_radix.SetUint64(uint64(radix))
+	bigRadix.SetUint64(uint64(radix))
 	for i, v := range s {
 		if v > maxv {
 			return x, fmt.Errorf("Value at %d out of range: got %d - expected 0..%d", i, v, maxv)
 		}
 		bv.SetUint64(uint64(v))
-		x.Mul(&x, &big_radix)
+		x.Mul(&x, &bigRadix)
 		x.Add(&x, &bv)
 	}
 	return x, nil
@@ -52,19 +52,19 @@ func Num(s []uint16, radix uint64) (big.Int, error) {
 // one digit in the given radix.  The array is arranged with the least significant digit in element 0,
 // down to the most significant digit in element len-1.
 func NumRev(s []uint16, radix uint64) (big.Int, error) {
-	var big_radix, bv, x big.Int
+	var bigRadix, bv, x big.Int
 	if radix > 65536 {
 		return x, fmt.Errorf("Radix (%d) too big: max supported radix is 65536", radix)
 	}
 
 	maxv := uint16(radix - 1)
-	big_radix.SetUint64(uint64(radix))
+	bigRadix.SetUint64(uint64(radix))
 	for i := len(s) - 1; i >= 0; i-- {
 		if s[i] > maxv {
 			return x, fmt.Errorf("Value at %d out of range: got %d - expected 0..%d", i, s[i], maxv)
 		}
 		bv.SetUint64(uint64(s[i]))
-		x.Mul(&x, &big_radix)
+		x.Mul(&x, &bigRadix)
 		x.Add(&x, &bv)
 	}
 	return x, nil
@@ -76,15 +76,15 @@ func NumRev(s []uint16, radix uint64) (big.Int, error) {
 // array is too short, the most significant digits of x are quietly lost.
 func Str(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
 
-	var big_radix, mod, v big.Int
+	var bigRadix, mod, v big.Int
 	if radix > 65536 {
 		return r, fmt.Errorf("Radix (%d) too big: max supported radix os 65536", radix)
 	}
 	m := len(r)
 	v.Set(x)
-	big_radix.SetUint64(radix)
+	bigRadix.SetUint64(radix)
 	for i := range r {
-		v.DivMod(&v, &big_radix, &mod)
+		v.DivMod(&v, &bigRadix, &mod)
 		r[m-i-1] = uint16(mod.Uint64())
 	}
 	if v.Sign() != 0 {
@@ -99,14 +99,14 @@ func Str(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
 // array is too short, the most significant digits of x are quietly lost.
 func StrRev(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
 
-	var big_radix, mod, v big.Int
+	var bigRadix, mod, v big.Int
 	if radix > 65536 {
 		return r, fmt.Errorf("Radix (%d) too big: max supported radix os 65536", radix)
 	}
 	v.Set(x)
-	big_radix.SetUint64(radix)
+	bigRadix.SetUint64(radix)
 	for i := range r {
-		v.DivMod(&v, &big_radix, &mod)
+		v.DivMod(&v, &bigRadix, &mod)
 		r[i] = uint16(mod.Uint64())
 	}
 	if v.Sign() != 0 {
@@ -117,14 +117,14 @@ func StrRev(x *big.Int, r []uint16, radix uint64) ([]uint16, error) {
 
 // DecodeNum constructs a string from indices into the alphabet embedded in the Codec. The indices
 // are encoded in the big Ints a and b.
-// len_a and len_b are the number of characters that should be built from the corresponding big Ints.
-func DecodeNum(a *big.Int, len_a int, b *big.Int, len_b int, c Codec) (string, error) {
-	ret := make([]uint16, len_a+len_b)
-	_, err := Str(a, ret[:len_a], uint64(c.Radix()))
+// lenA and lenB are the number of characters that should be built from the corresponding big Ints.
+func DecodeNum(a *big.Int, lenA int, b *big.Int, lenB int, c Codec) (string, error) {
+	ret := make([]uint16, lenA+lenB)
+	_, err := Str(a, ret[:lenA], uint64(c.Radix()))
 	if err != nil {
 		return "", err
 	}
-	_, err = Str(b, ret[len_a:], uint64(c.Radix()))
+	_, err = Str(b, ret[lenA:], uint64(c.Radix()))
 	if err != nil {
 		return "", err
 	}

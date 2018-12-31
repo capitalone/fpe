@@ -74,12 +74,12 @@ type Cipher struct {
 
 const (
 	// from func (*big.Int)SetString
-	legacy_alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRTSUVWXYZ"
+	legacyAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRTSUVWXYZ"
 )
 
 // NewCipher is provided for backwards compatibility for old client code.
 func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
-	return NewAlphaCipher(legacy_alphabet[:radix], maxTLen, key, tweak)
+	return NewAlphaCipher(legacyAlphabet[:radix], maxTLen, key, tweak)
 }
 
 // NewAlphaCipher initializes a new FF1 Cipher for encryption or decryption use
