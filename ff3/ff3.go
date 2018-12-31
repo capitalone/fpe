@@ -26,7 +26,7 @@ import (
 	"crypto/cipher"
 	"errors"
 	"fmt"
-	"github.com/capitalone/fpe/fpeutils"
+	"github.com/capitalone/fpe/fpeUtils"
 	"math"
 	"math/big"
 )
@@ -53,7 +53,7 @@ var (
 // using a particular key, radix, and tweak
 type Cipher struct {
 	tweak  []byte
-	codec  fpeutils.Codec
+	codec  fpeUtils.Codec
 	minLen uint32
 	maxLen uint32
 
@@ -83,7 +83,7 @@ func NewCipherWithAlphabet(alphabet string, key []byte, tweak []byte) (Cipher, e
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
-	codec, err := fpeutils.NewCodec(alphabet)
+	codec, err := fpeUtils.NewCodec(alphabet)
 	if err != nil {
 		return newCipher, fmt.Errorf("error making codec: %s", err)
 	}
@@ -222,7 +222,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		P[3] = W[3] ^ byte(i)
 
 		// The remaining 12 bytes of P are for rev(B) with padding
-		numB, err = fpeutils.NumRev(B, uint64(radix))
+		numB, err = fpeUtils.NumRev(B, uint64(radix))
 		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
@@ -247,7 +247,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		numY.SetBytes(S[:])
 
 		// Calculate c
-		numC, err = fpeutils.NumRev(A, uint64(radix))
+		numC, err = fpeUtils.NumRev(A, uint64(radix))
 		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
@@ -261,7 +261,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		}
 
 		C = C[:m]
-		_, err := fpeutils.StrRev(&numC, C, uint64(c.codec.Radix()))
+		_, err := fpeUtils.StrRev(&numC, C, uint64(c.codec.Radix()))
 		if err != nil {
 			return "", err
 		}
@@ -381,7 +381,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		P[3] = W[3] ^ byte(i)
 
 		// The remaining 12 bytes of P are for rev(A) with padding
-		numA, err = fpeutils.NumRev(A, uint64(radix))
+		numA, err = fpeUtils.NumRev(A, uint64(radix))
 		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
@@ -406,7 +406,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		numY.SetBytes(S[:])
 
 		// Calculate c
-		numC, err = fpeutils.NumRev(B, uint64(radix))
+		numC, err = fpeUtils.NumRev(B, uint64(radix))
 		if err != nil {
 			return ret, ErrStringNotInRadix
 		}
@@ -420,7 +420,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		}
 
 		C = C[:m]
-		_, err := fpeutils.StrRev(&numC, C, uint64(c.codec.Radix()))
+		_, err := fpeUtils.StrRev(&numC, C, uint64(c.codec.Radix()))
 		if err != nil {
 			return "", err
 		}
