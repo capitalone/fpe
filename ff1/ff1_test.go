@@ -242,7 +242,7 @@ func TestUnicode(t *testing.T) {
 	tweak, err := hex.DecodeString("D8E7920AFA330A73")
 
 	// 0-9 plus a 1-byte, 2-byte, 3-byte and 4-byte utf-8 chars
-	ff1, err := NewAlphaCipher("0123456789\u0024\u00A2\u0939\u10348", 8, key, tweak)
+	ff1, err := NewCipherWithAlphabet("0123456789\u0024\u00A2\u0939\u10348", 8, key, tweak)
 	if err != nil {
 		t.Fatalf("Unable to create cipher: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestAlphabetSizes(t *testing.T) {
 			t.Fatalf("TestAlphabetSizes: %s", err)
 		}
 
-		ff1, err := NewAlphaCipher(a, 8, key, tweak)
+		ff1, err := NewCipherWithAlphabet(a, 8, key, tweak)
 		if err != nil {
 			t.Fatalf("Unable to create cipher: %v", err)
 		}

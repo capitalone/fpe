@@ -79,12 +79,12 @@ const (
 
 // NewCipher is provided for backwards compatibility for old client code.
 func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
-	return NewAlphaCipher(legacyAlphabet[:radix], maxTLen, key, tweak)
+	return NewCipherWithAlphabet(legacyAlphabet[:radix], maxTLen, key, tweak)
 }
 
 // NewAlphaCipher initializes a new FF1 Cipher for encryption or decryption use
 // based on the alphabet, max tweak length, key and tweak parameters.
-func NewAlphaCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+func NewCipherWithAlphabet(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)

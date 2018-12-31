@@ -222,7 +222,7 @@ func TestAlphabetSizes(t *testing.T) {
 			t.Fatalf("TestAlphabetSizes: %s", err)
 		}
 
-		ff3, err := NewAlphaCipher(a, key, tweak)
+		ff3, err := NewCipherWithAlphabet(a, key, tweak)
 		if err != nil {
 			t.Fatalf("Unable to create cipher: %v", err)
 		}

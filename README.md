@@ -58,7 +58,7 @@ func main() {
 
 	// Create a new FF1 cipher "object"
 	// Alphabet defines the supported character set, and 8 is the tweak length.
-	FF1, err := ff1.NewAlphaCipher(alphabet, 8, key, tweak)
+	FF1, err := ff1.NewCipherWithAlphabet(alphabet, 8, key, tweak)
 	if err != nil {
 		panic(err)
 	}
