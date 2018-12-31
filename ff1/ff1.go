@@ -27,7 +27,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/capitalone/fpe"
+	"github.com/capitalone/fpe/fpeutils"
 	"math"
 	"math/big"
 )
@@ -62,7 +62,7 @@ type cbcMode interface {
 // using a particular key, radix, and tweak
 type Cipher struct {
 	tweak   []byte
-	codec   fpe.Codec
+	codec   fpeutils.Codec
 	radix   int
 	minLen  uint32
 	maxLen  uint32
@@ -94,7 +94,7 @@ func NewAlphaCipher(alphabet string, maxTLen int, key []byte, tweak []byte) (Cip
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
-	codec, err := fpe.NewCodec(alphabet)
+	codec, err := fpeutils.NewCodec(alphabet)
 	if err != nil {
 		return newCipher, fmt.Errorf("error making codec: %s", err)
 	}
@@ -280,12 +280,12 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	numA, err = fpe.Num(A, uint64(radix))
+	numA, err = fpeutils.Num(A, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	numB, err = fpe.Num(B, uint64(radix))
+	numB, err = fpeutils.Num(B, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
@@ -361,7 +361,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		numB = numC
 	}
 
-	return fpe.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
+	return fpeutils.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
 }
 
 // Decrypt decrypts the string X over the current FF1 parameters
@@ -505,12 +505,12 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	numA, err = fpe.Num(A, uint64(radix))
+	numA, err = fpeutils.Num(A, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	numB, err = fpe.Num(B, uint64(radix))
+	numB, err = fpeutils.Num(B, uint64(radix))
 	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
@@ -586,7 +586,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		numA = numC
 	}
 
-	return fpe.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
+	return fpeutils.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
 }
 
 // ciph defines how the main block cipher is called.

@@ -17,7 +17,9 @@ See the License for the specific language governing permissions and limitations 
 
 */
 
-package fpe
+// Package fpeutils provides some encoding helpers for use
+// in the FF1 and FF3 format-preserving encryption packages.
+package fpeutils
 
 import (
 	"bytes"
