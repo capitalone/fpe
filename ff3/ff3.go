@@ -18,7 +18,7 @@ See the License for the specific language governing permissions and limitations 
 */
 
 // Package ff3 implements the FF3 format-preserving encryption
-// algorithm/scheme
+// algorithm/scheme in accordance to NIST SP 800-38G Rev. 1
 package ff3
 
 import (
@@ -29,12 +29,12 @@ import (
 	"math/big"
 )
 
-// Note that this is strictly following the official NIST guidelines. In the linked PDF Appendix A (READHME.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
 const (
-	feistelMin   = 100
+	// feistelMin and tweakLen are in accordance to NIST SP 800-38G Rev. 1 Appendix A
+	feistelMin   = 1000000
+	tweakLen     = 7
 	numRounds    = 8
 	blockSize    = aes.BlockSize
-	tweakLen     = 8
 	halfTweakLen = tweakLen / 2
 	// maxRadix   = 65536 // 2^16
 )
@@ -43,8 +43,8 @@ var (
 	// ErrStringNotInRadix is returned if input or intermediate strings cannot be parsed in the given radix
 	ErrStringNotInRadix = errors.New("string is not within base/radix")
 
-	// ErrTweakLengthInvalid is returned if the tweak length is not 8 bytes
-	ErrTweakLengthInvalid = errors.New("tweak must be 8 bytes, or 64 bits")
+	// ErrTweakLengthInvalid is returned if the tweak length is not 7 bytes
+	ErrTweakLengthInvalid = errors.New("tweak must be 7 bytes, or 56 bits")
 )
 
 // A Cipher is an instance of the FF3 mode of format preserving encryption

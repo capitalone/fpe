@@ -18,7 +18,7 @@ See the License for the specific language governing permissions and limitations 
 */
 
 // Package ff1 implements the FF1 format-preserving encryption
-// algorithm/scheme
+// algorithm/scheme in accordance to NIST SP 800-38G Rev. 1
 package ff1
 
 import (
@@ -31,9 +31,9 @@ import (
 	"strings"
 )
 
-// Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
 const (
-	feistelMin    = 100
+	// feistelMin is in accordance to NIST SP 800-38G Rev. 1 Appendix A
+	feistelMin    = 1000000
 	numRounds     = 10
 	blockSize     = aes.BlockSize
 	halfBlockSize = blockSize / 2
