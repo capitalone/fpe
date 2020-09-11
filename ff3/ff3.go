@@ -29,7 +29,7 @@ import (
 	"math/big"
 )
 
-// Note that this is strictly following the official NIST guidelines. In the linked PDF Appendix A (READHME.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
+// Note that this is strictly following the official NIST guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
 const (
 	feistelMin   = 100
 	numRounds    = 8
