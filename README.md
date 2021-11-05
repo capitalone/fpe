@@ -1,3 +1,5 @@
+# Due to changes in the priorities, this project is currently not being supported. The project is archived as of 11/5/21 and will be available in a read-only state. Please note, since archival, the project is not maintained or reviewed. #
+
 [![Godoc](https://godoc.org/github.com/capitalone/fpe?status.svg)](http://godoc.org/github.com/capitalone/fpe) [![Build Status](https://travis-ci.org/capitalone/fpe.svg?branch=master)](https://travis-ci.org/capitalone/fpe) [![Go Report Card](https://goreportcard.com/badge/github.com/capitalone/fpe)](https://goreportcard.com/report/github.com/capitalone/fpe) [![Sourcegraph](https://sourcegraph.com/github.com/capitalone/fpe/-/badge.svg)](https://sourcegraph.com/github.com/capitalone/fpe?badge) [![License](https://img.shields.io/badge/license-Apache%202-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 # fpe - Format Preserving Encryption Implementation in Go
