@@ -38,6 +38,7 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/capitalone/fpe"
 	"github.com/capitalone/fpe/ff1"
 )
 
@@ -54,9 +55,12 @@ func main() {
 		panic(err)
 	}
 
+        // The alphabet can contain up 65536 unique characters constructed from a Utf-8 string.
+	alphabet := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-_=[]{}!$%^&*() \u2318"
+
 	// Create a new FF1 cipher "object"
-	// 10 is the radix/base, and 8 is the tweak length.
-	FF1, err := ff1.NewCipher(10, 8, key, tweak)
+	// Alphabet defines the supported character set, and 8 is the tweak length.
+	FF1, err := ff1.NewCipherWithAlphabet(alphabet, 8, key, tweak)
 	if err != nil {
 		panic(err)
 	}

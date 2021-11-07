@@ -26,9 +26,10 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"github.com/capitalone/fpe/fpeUtils"
 	"math"
 	"math/big"
-	"strings"
 )
 
 // Note that this is strictly following the official NIST spec guidelines. In the linked PDF Appendix A (README.md), NIST recommends that radix^minLength >= 1,000,000. If you would like to follow that, change this parameter.
@@ -61,6 +62,7 @@ type cbcMode interface {
 // using a particular key, radix, and tweak
 type Cipher struct {
 	tweak   []byte
+	codec   fpeUtils.Codec
 	radix   int
 	minLen  uint32
 	maxLen  uint32
@@ -70,9 +72,19 @@ type Cipher struct {
 	cbcEncryptor cipher.BlockMode
 }
 
-// NewCipher initializes a new FF1 Cipher for encryption or decryption use
-// based on the radix, max tweak length, key and tweak parameters.
+const (
+	// from func (*big.Int)SetString
+	legacyAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRTSUVWXYZ"
+)
+
+// NewCipher is provided for backwards compatibility for old client code.
 func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
+	return NewCipherWithAlphabet(legacyAlphabet[:radix], maxTLen, key, tweak)
+}
+
+// NewAlphaCipher initializes a new FF1 Cipher for encryption or decryption use
+// based on the alphabet, max tweak length, key and tweak parameters.
+func NewCipherWithAlphabet(alphabet string, maxTLen int, key []byte, tweak []byte) (Cipher, error) {
 	var newCipher Cipher
 
 	keyLen := len(key)
@@ -82,10 +94,16 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 		return newCipher, errors.New("key length must be 128, 192, or 256 bits")
 	}
 
-	// While FF1 allows radices in [2, 2^16],
-	// realistically there's a practical limit based on the alphabet that can be passed in
-	if (radix < 2) || (radix > big.MaxBase) {
-		return newCipher, errors.New("radix must be between 2 and 36, inclusive")
+	codec, err := fpeUtils.NewCodec(alphabet)
+	if err != nil {
+		return newCipher, fmt.Errorf("error making codec: %s", err)
+	}
+
+	radix := codec.Radix()
+
+	// FF1 allows radices in [2, 2^16],
+	if (radix < 2) || (radix > 65536) {
+		return newCipher, fmt.Errorf("radix must be between 2 and 65536: %d supplied", radix)
 	}
 
 	// Make sure the length of given tweak is in range
@@ -98,8 +116,8 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 
 	var maxLen uint32 = math.MaxUint32
 
-	// Make sure 2 <= minLength <= maxLength < 2^32 is satisfied
-	if (minLen < 2) || (maxLen < minLen) || (maxLen > math.MaxUint32) {
+	// Make sure minLength <= maxLength < 2^32 is satisfied
+	if (maxLen < minLen) || (maxLen > math.MaxUint32) {
 		return newCipher, errors.New("minLen invalid, adjust your radix")
 	}
 
@@ -112,7 +130,7 @@ func NewCipher(radix int, maxTLen int, key []byte, tweak []byte) (Cipher, error)
 	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
 	newCipher.tweak = tweak
-	newCipher.radix = radix
+	newCipher.codec = codec
 	newCipher.minLen = minLen
 	newCipher.maxLen = maxLen
 	newCipher.maxTLen = maxTLen
@@ -135,9 +153,16 @@ func (c Cipher) Encrypt(X string) (string, error) {
 func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
-	var ok bool
 
-	n := uint32(len(X))
+	// String X contains a sequence of characters, where some characters
+	// might take up multiple bytes. Convert into an array of indices into
+	// the alphabet embedded in the codec.
+	Xn, err := c.codec.Encode(X)
+	if err != nil {
+		return ret, ErrStringNotInRadix
+	}
+
+	n := uint32(len(Xn))
 	t := len(tweak)
 
 	// Check if message length is within minLength and maxLength bounds
@@ -150,22 +175,15 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		return ret, ErrTweakLengthInvalid
 	}
 
-	radix := c.radix
-
-	// Check if the message is in the current radix
-	var numX big.Int
-	_, ok = numX.SetString(X, radix)
-	if !ok {
-		return ret, ErrStringNotInRadix
-	}
+	radix := c.codec.Radix()
 
 	// Calculate split point
 	u := n / 2
 	v := n - u
 
 	// Split the message
-	A := X[:u]
-	B := X[u:]
+	A := Xn[:u]
+	B := Xn[u:]
 
 	// Byte lengths
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
@@ -197,7 +215,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	binary.BigEndian.PutUint32(P[8:12], n)
 	binary.BigEndian.PutUint32(P[12:lenP], uint32(t))
 
-	// Determinte lengths of byte slices
+	// Determine lengths of byte slices
 
 	// Q's length is known to always be t+b+1+numPad, to be multiple of 16
 	lenQ := t + b + 1 + numPad
@@ -262,13 +280,13 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	_, ok = numA.SetString(A, radix)
-	if !ok {
+	numA, err = fpeUtils.Num(A, uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	_, ok = numB.SetString(B, radix)
-	if !ok {
+	numB, err = fpeUtils.Num(B, uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
@@ -343,16 +361,7 @@ func (c Cipher) EncryptWithTweak(X string, tweak []byte) (string, error) {
 		numB = numC
 	}
 
-	A = numA.Text(radix)
-	B = numB.Text(radix)
-
-	// Pad both A and B properly
-	A = strings.Repeat("0", int(u)-len(A)) + A
-	B = strings.Repeat("0", int(v)-len(B)) + B
-
-	ret = A + B
-
-	return ret, nil
+	return fpeUtils.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
 }
 
 // Decrypt decrypts the string X over the current FF1 parameters
@@ -369,9 +378,16 @@ func (c Cipher) Decrypt(X string) (string, error) {
 func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	var ret string
 	var err error
-	var ok bool
 
-	n := uint32(len(X))
+	// String X contains a sequence of characters, where some characters
+	// might take up multiple bytes. Convert into an array of indices into
+	// the alphabet embedded in the codec.
+	Xn, err := c.codec.Encode(X)
+	if err != nil {
+		return ret, ErrStringNotInRadix
+	}
+
+	n := uint32(len(Xn))
 	t := len(tweak)
 
 	// Check if message length is within minLength and maxLength bounds
@@ -384,22 +400,15 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		return ret, ErrTweakLengthInvalid
 	}
 
-	radix := c.radix
-
-	// Check if the message is in the current radix
-	var numX big.Int
-	_, ok = numX.SetString(X, radix)
-	if !ok {
-		return ret, ErrStringNotInRadix
-	}
+	radix := c.codec.Radix()
 
 	// Calculate split point
 	u := n / 2
 	v := n - u
 
 	// Split the message
-	A := X[:u]
-	B := X[u:]
+	A := Xn[:u]
+	B := Xn[u:]
 
 	// Byte lengths
 	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
@@ -431,7 +440,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	binary.BigEndian.PutUint32(P[8:12], n)
 	binary.BigEndian.PutUint32(P[12:lenP], uint32(t))
 
-	// Determinte lengths of byte slices
+	// Determine lengths of byte slices
 
 	// Q's length is known to always be t+b+1+numPad, to be multiple of 16
 	lenQ := t + b + 1 + numPad
@@ -496,13 +505,13 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 	numModV.Exp(&numRadix, &numV, nil)
 
 	// Bootstrap for 1st round
-	_, ok = numA.SetString(A, radix)
-	if !ok {
+	numA, err = fpeUtils.Num(A, uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
-	_, ok = numB.SetString(B, radix)
-	if !ok {
+	numB, err = fpeUtils.Num(B, uint64(radix))
+	if err != nil {
 		return ret, ErrStringNotInRadix
 	}
 
@@ -577,16 +586,7 @@ func (c Cipher) DecryptWithTweak(X string, tweak []byte) (string, error) {
 		numA = numC
 	}
 
-	A = numA.Text(radix)
-	B = numB.Text(radix)
-
-	// Pad both A and B properly
-	A = strings.Repeat("0", int(u)-len(A)) + A
-	B = strings.Repeat("0", int(v)-len(B)) + B
-
-	ret = A + B
-
-	return ret, nil
+	return fpeUtils.DecodeNum(&numA, len(A), &numB, len(B), c.codec)
 }
 
 // ciph defines how the main block cipher is called.
