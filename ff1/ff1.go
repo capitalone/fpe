@@ -599,7 +599,11 @@ func (c Cipher) ciph(input []byte) ([]byte, error) {
 		return nil, errors.New("length of ciph input must be multiple of 16")
 	}
 
-	c.cbcEncryptor.CryptBlocks(input, input)
+	// Some crypto engines (e.g. PKCS7) always do padding (i.e. additional block is added), we need output buffer one block bigger
+	ciphertext := make([]byte, len(input)+blockSize)
+	c.cbcEncryptor.CryptBlocks(ciphertext, input)
+	// This FF1 implementation is update buffer in-place, copy result back to input
+	copy(input, ciphertext[:len(input)])
 
 	// Reset IV to 0
 	c.cbcEncryptor.(cbcMode).SetIV(ivZero)
